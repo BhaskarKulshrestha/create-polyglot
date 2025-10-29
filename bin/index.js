@@ -8,6 +8,7 @@ import path from 'path';
 import { renderServicesTable } from './lib/ui.js';
 import { runDev } from './lib/dev.js';
 import { startAdminDashboard } from './lib/admin.js';
+import { runHotReload } from './lib/hotreload.js';
  
 const program = new Command();
  
@@ -161,6 +162,22 @@ program
       });
     } catch (e) {
       console.error(chalk.red('Failed to start admin dashboard:'), e.message);
+      process.exit(1);
+    }
+  });
+
+// Unified hot reload aggregator
+program
+  .command('hot')
+  .description('Unified hot reload across services (auto-restart / HMR)')
+  .option('-s, --services <list>', 'Subset of services (comma names or types)')
+  .option('--dry-run', 'Show what would run without starting processes')
+  .action(async (opts) => {
+    try {
+      const filter = opts.services ? opts.services.split(',').map(s => s.trim()).filter(Boolean) : [];
+      await runHotReload({ servicesFilter: filter, dryRun: !!opts.dryRun });
+    } catch (e) {
+      console.error(chalk.red('Failed to start hot reload:'), e.message);
       process.exit(1);
     }
   });

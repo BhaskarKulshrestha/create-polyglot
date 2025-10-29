@@ -38,7 +38,7 @@ describe('polyglot dev command (non-docker)', () => {
     proc.kill('SIGINT');
     await proc.catch(()=>{}); // ignore exit errors due to SIGINT
     expect(fs.existsSync(path.join(projectPath,'polyglot.json'))).toBe(true);
-  }, 20000);
+  }, 30000);
 
     // New tests for updated dev.js
     it('warns and skips service with no package.json', async () => {

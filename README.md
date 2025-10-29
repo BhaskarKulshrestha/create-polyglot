@@ -53,6 +53,7 @@ Building a production-style polyglot microservice environment normally requires 
 Use it to prototype architectures, onboard teams faster, or spin up reproducible demos / PoCs.
 
 ## Features
+
 - 🚀 Rapid polyglot monorepo scaffolding (Node.js, Python/FastAPI, Go, Java Spring Boot, Next.js)
 - 🧩 Optional presets: Turborepo, Nx, or Basic runner
 - 🐳 Automatic Dockerfile + Docker Compose generation
@@ -61,6 +62,7 @@ Use it to prototype architectures, onboard teams faster, or spin up reproducible
 - 📦 Shared package (`packages/shared`) for cross-service JS utilities
 - 🧪 Vitest test setup for the CLI itself
 - 🌈 Colorized dev logs & health probing for Node/frontend services
+- 🔥 Unified hot reload aggregator (`create-polyglot hot`) for Node, Next.js, Python (uvicorn), Go, and Java (Spring Boot)
 - 🔌 Plugin skeleton generation (`create-polyglot add plugin <name>`)
 - 📄 Single source of truth: `polyglot.json`
 - ✅ Safe guards: port collision checks, reserved name checks, graceful fallbacks
@@ -69,6 +71,7 @@ Use it to prototype architectures, onboard teams faster, or spin up reproducible
 ## Quick Start
 Scaffold a workspace named `my-org` with multiple services:
 
+| `create-polyglot hot [--services <subset>] [--dry-run]` | Unified hot reload (restart / HMR) across services. |
 ```bash
 npx create-polyglot init my-org -s node,python,go,java,frontend --git --yes
 ```
@@ -76,6 +79,20 @@ npx create-polyglot init my-org -s node,python,go,java,frontend --git --yes
 Then run everything (Node + frontend locally):
 ```bash
 create-polyglot dev
+```
+Unified hot reload (auto restart / HMR):
+```bash
+create-polyglot hot
+```
+
+Dry run (see what would execute without starting processes):
+```bash
+create-polyglot hot --dry-run
+```
+
+Limit to a subset (by names or types):
+```bash
+create-polyglot hot --services node,python
 ```
 
 Or via Docker Compose:
