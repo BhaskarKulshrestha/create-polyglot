@@ -1,4 +1,0 @@
-{
-    "git.enableCommitSigning": true,
-    "git.alwaysSignOff": true
-}
