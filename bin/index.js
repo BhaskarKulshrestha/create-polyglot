@@ -28,6 +28,7 @@ program
   .option('--force', 'Overwrite if directory exists and not empty')
   .option('--package-manager <pm>', 'npm | pnpm | yarn | bun (default: npm)')
   .option('--frontend-generator', 'Use create-next-app to scaffold the frontend instead of the bundled template')
+  .option('--with-actions', 'Generate a GitHub Actions CI workflow (ci.yml)')
   .option('--yes', 'Skip confirmation (assume yes) for non-interactive use')
   .action(async (projectNameArg, options) => {
     await scaffoldMonorepo(projectNameArg, options);
@@ -43,6 +44,7 @@ program
   .option('--force', '(Deprecated) Overwrite directory')
   .option('--package-manager <pm>', '(Deprecated) Package manager')
   .option('--frontend-generator', '(Deprecated) Use create-next-app for frontend')
+  .option('--with-actions', '(Deprecated) Generate GitHub Actions workflow')
   .option('--yes', '(Deprecated) Assume yes for prompts')
   .action(async (projectNameArg, options) => {
     if (!options._deprecatedNoticeShown) {

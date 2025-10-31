@@ -178,9 +178,19 @@ create-polyglot dev --docker
 | `--package-manager <pm>` | One of `npm|pnpm|yarn|bun` (default: detect or npm) |
 | `--frontend-generator` | Use `create-next-app` (falls back to template on failure) |
 | `--force` | Overwrite existing target directory if it exists |
+| `--with-actions` | Generate a starter GitHub Actions CI workflow (`.github/workflows/ci.yml`) |
 | `--yes` | Accept defaults & suppress interactive prompts |
 
 If you omit flags, the wizard will prompt interactively (similar to `create-next-app`).
+
+### Optional GitHub Actions CI
+Pass `--with-actions` (or answer "yes" to the prompt) and the scaffold adds a minimal workflow at `.github/workflows/ci.yml` that:
+- Triggers on pushes & pull requests targeting `main` / `master`
+- Sets up Node.js (20.x) with dependency cache
+- Installs dependencies (respects your chosen package manager)
+- Runs the test suite (`npm test` / `yarn test` / `pnpm test` / `bun test`)
+
+You can extend it with build, lint, docker publish, or matrix strategies. If you skip it initially you can always add later manually.
 
 ## Generated Structure
 ```
