@@ -11,7 +11,7 @@ async function checkServiceStatus(service) {
       resolve({ status: 'down', error: 'Timeout' });
     }, 3000);
  
-    const req = http.get(`http://localhost:${service.port}`, (res) => {
+    const req = http.get(`http://localhost:${service.port}/health`, (res) => {
       clearTimeout(timeout);
       resolve({
         status: res.statusCode < 400 ? 'up' : 'error',

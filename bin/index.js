@@ -29,27 +29,22 @@ program
   .option('--package-manager <pm>', 'npm | pnpm | yarn | bun (default: npm)')
   .option('--frontend-generator', 'Use create-next-app to scaffold the frontend instead of the bundled template')
   .option('--yes', 'Skip confirmation (assume yes) for non-interactive use')
-  .action(async (projectNameArg, options) => {
+  .action(async (...args) => {
+    const projectNameArg = args[0];
+    const command = args[args.length - 1];
+    const options = command.opts();
+    
     await scaffoldMonorepo(projectNameArg, options);
   });
  
 // Backward compatibility: calling the root command directly still scaffolds (deprecated path).
+// Simplified to avoid option conflicts with subcommands
 program
   .argument('[project-name]', '(Deprecated: call `create-polyglot init <name>` instead) Project name')
-  .option('-s, --services <services>', '(Deprecated) Services list')
-  .option('--preset <preset>', '(Deprecated) Preset turborepo|nx')
-  .option('--no-install', '(Deprecated) Skip install')
-  .option('--git', '(Deprecated) Init git')
-  .option('--force', '(Deprecated) Overwrite directory')
-  .option('--package-manager <pm>', '(Deprecated) Package manager')
-  .option('--frontend-generator', '(Deprecated) Use create-next-app for frontend')
-  .option('--yes', '(Deprecated) Assume yes for prompts')
-  .action(async (projectNameArg, options) => {
-    if (!options._deprecatedNoticeShown) {
-      console.log(chalk.yellow('⚠️  Direct invocation is deprecated. Use `create-polyglot init` going forward.'));
-      options._deprecatedNoticeShown = true;
-    }
-    await scaffoldMonorepo(projectNameArg, options);
+  .action(async (projectNameArg) => {
+    console.log(chalk.yellow('⚠️  Direct invocation is deprecated. Use `create-polyglot init` going forward.'));
+    console.log(chalk.yellow('   Example: create-polyglot init ' + (projectNameArg || 'my-project')));
+    process.exit(1);
   });
  
 // Additional commands must be registered before final parse.

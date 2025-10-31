@@ -20,7 +20,7 @@ describe('create-polyglot CLI smoke', () => {
   it('scaffolds a project with a node service', async () => {
     const repoRoot = process.cwd();
     const cliPath = path.join(repoRoot, 'bin/index.js');
-  await execa('node', [cliPath, projName, '--services', 'node', '--no-install', '--yes'], { cwd: tmpDir });
+  await execa('node', [cliPath, 'init', projName, '--services', 'node', '--no-install', '--yes'], { cwd: tmpDir });
     const projectPath = path.join(tmpDir, projName);
     expect(fs.existsSync(path.join(projectPath, 'services/node'))).toBe(true);
     expect(fs.existsSync(path.join(projectPath, 'package.json'))).toBe(true);
