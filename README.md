@@ -105,6 +105,28 @@ Add a new service later:
 create-polyglot add service payments --type node --port 4100
 ```
 
+### New Interactive Flow (Dynamic Service Count)
+If you omit `--services`, the CLI now asks:
+1. "How many services do you want to create?" (enter a number)
+2. For each service: choose a type (Node, Python, Go, Java, Frontend)
+3. Optionally enter a custom name (blank keeps the default type name)
+4. Optionally override the suggested port (blank keeps default)
+
+Example (interactive):
+```bash
+create-polyglot init my-org
+# > How many services? 3
+# > Service #1 type: Node.js (Express)
+# > Name for node service: api
+# > Port for api (node) (default 3001): 4001
+# > Service #2 type: Python (FastAPI)
+# > Name for python service: (enter)  # keeps 'python'
+# > Port for python (python) (default 3004): (enter)
+# > Service #3 type: Frontend (Next.js)
+# ...
+```
+Non-interactive (`--yes`) still scaffolds exactly one `node` service by default for speed.
+
 ## Installation
 Global (recommended for repeated use):
 ```bash

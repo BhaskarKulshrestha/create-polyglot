@@ -173,16 +173,58 @@ export async function scaffoldMonorepo(projectNameArg, options) {
         services.push({ type, name, port });
       }
     } else {
-      const answer = await prompts({
-        type: 'multiselect',
-        name: 'serviceTypes',
-        message: 'Select services to include:',
-        choices: allServiceChoices,
-        instructions: false,
-        min: 1
+      // New dynamic interactive flow: ask how many services, then collect each.
+      const countAns = await prompts({
+        type: 'number',
+        name: 'svcCount',
+        message: 'How many services do you want to create?',
+        initial: 1,
+        min: 1,
+        validate: v => Number.isInteger(v) && v > 0 && v <= 50 ? true : 'Enter a positive integer (max 50)'
       });
-      const selected = answer.serviceTypes || [];
-      for (const type of selected) services.push({ type, name: type, port: defaultPorts[type] });
+      const svcCount = countAns.svcCount || 1;
+      for (let i = 0; i < svcCount; i++) {
+        const typeAns = await prompts({
+          type: 'select',
+          name: 'svcType',
+          message: `Service #${i+1} type:`,
+          choices: allServiceChoices.map(c => ({ title: c.title, value: c.value })),
+          initial: 0
+        });
+        const svcType = typeAns.svcType;
+        if (!svcType) {
+          console.log(chalk.red('No type selected; aborting.'));
+          process.exit(1);
+        }
+        const nameAns = await prompts({
+          type: 'text',
+          name: 'svcName',
+          message: `Name for ${svcType} service (leave blank for default '${svcType}'):`,
+          validate: v => !v || (/^[a-zA-Z0-9._-]+$/.test(v) ? true : 'Use alphanumerics, dash, underscore, dot')
+        });
+        let svcName = nameAns.svcName && nameAns.svcName.trim() ? nameAns.svcName.trim() : svcType;
+        if (reservedNames.has(svcName) || services.find(s => s.name === svcName)) {
+          console.log(chalk.red(`Name '${svcName}' is reserved or already used. Using '${svcType}'.`));
+          svcName = svcType;
+        }
+        const portDefault = defaultPorts[svcType];
+        const portAns = await prompts({
+          type: 'text',
+          name: 'svcPort',
+          message: `Port for ${svcName} (${svcType}) (default ${portDefault}):`,
+          validate: v => !v || (/^\d+$/.test(v) && +v > 0 && +v <= 65535) ? true : 'Enter a valid port 1-65535'
+        });
+        let svcPort = portDefault;
+        if (portAns.svcPort) {
+          const parsed = Number(portAns.svcPort);
+          if (services.find(s => s.port === parsed)) {
+            console.log(chalk.red(`Port ${parsed} already used; keeping ${portDefault}.`));
+          } else if (parsed >=1 && parsed <= 65535) {
+            svcPort = parsed;
+          }
+        }
+        services.push({ type: svcType, name: svcName, port: svcPort });
+      }
     }
 
     // Always allow customization of name & port in interactive mode (not nonInteractive)
