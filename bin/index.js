@@ -28,6 +28,7 @@ program
   .option('--force', 'Overwrite if directory exists and not empty')
   .option('--package-manager <pm>', 'npm | pnpm | yarn | bun (default: npm)')
   .option('--frontend-generator', 'Use create-next-app to scaffold the frontend instead of the bundled template')
+  .option('--with-actions', 'Generate a GitHub Actions CI workflow (ci.yml)')
   .option('--yes', 'Skip confirmation (assume yes) for non-interactive use')
   .action(async (...args) => {
     const projectNameArg = args[0];

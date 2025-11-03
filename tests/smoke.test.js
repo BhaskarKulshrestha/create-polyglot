@@ -17,7 +17,7 @@ describe('create-polyglot CLI smoke', () => {
     try { fs.rmSync(tmpParent, { recursive: true, force: true }); } catch {}
   });
 
-  it('scaffolds a project with a node service', async () => {
+  it('scaffolds a project with a node service (using init subcommand)', async () => {
     const repoRoot = process.cwd();
     const cliPath = path.join(repoRoot, 'bin/index.js');
   await execa('node', [cliPath, 'init', projName, '--services', 'node', '--no-install', '--yes'], { cwd: tmpDir });
