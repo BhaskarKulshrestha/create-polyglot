@@ -23,22 +23,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
         validate: v => v && /^[a-zA-Z0-9._-]+$/.test(v) ? true : 'Use alphanumerics, dash, underscore, dot'
       });
     }
-    if (!options.services) {
-      interactiveQuestions.push({
-        type: 'multiselect',
-        name: 'services',
-        message: 'Select services to include:',
-        choices: [
-          { title: 'Node.js (Express)', value: 'node' },
-          { title: 'Python (FastAPI)', value: 'python' },
-          { title: 'Go (Fiber-like)', value: 'go' },
-          { title: 'Java (Spring Boot)', value: 'java' },
-          { title: 'Frontend (Next.js)', value: 'frontend' }
-        ],
-        instructions: false,
-        min: 1
-      });
-    }
+
     if (!options.preset) {
       interactiveQuestions.push({
         type: 'select',
@@ -97,9 +82,6 @@ export async function scaffoldMonorepo(projectNameArg, options) {
             case 'projectName':
               answers.projectName = projectNameArg || 'app';
               break;
-            case 'services':
-              answers.services = ['node'];
-              break;
             case 'preset':
               answers.preset = '';
               break;
@@ -131,11 +113,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       console.error(chalk.red('Project name is required.'));
       process.exit(1);
     }
-    options.services = options.services || (answers.services ? answers.services.join(',') : undefined);
-    if (!options.services) {
-      console.error(chalk.red('At least one service must be selected.'));
-      process.exit(1);
-    }
+    // Note: options.services will be handled in the dynamic flow below if not provided via CLI
     options.preset = options.preset || answers.preset || '';
     options.packageManager = options.packageManager || answers.packageManager || 'npm';
     if (options.git === undefined) options.git = answers.git;
@@ -187,17 +165,21 @@ export async function scaffoldMonorepo(projectNameArg, options) {
         services.push({ type, name, port });
       }
     } else {
-      // New dynamic interactive flow: ask how many services, then collect each.
-      const countAns = await prompts({
-        type: 'number',
-        name: 'svcCount',
-        message: 'How many services do you want to create?',
-        initial: 1,
-        min: 1,
-        validate: v => Number.isInteger(v) && v > 0 && v <= 50 ? true : 'Enter a positive integer (max 50)'
-      });
-      const svcCount = countAns.svcCount || 1;
-      for (let i = 0; i < svcCount; i++) {
+      // Dynamic interactive flow: ask how many services, then collect each.
+      // In non-interactive mode, default to a single node service
+      if (nonInteractive) {
+        services.push({ type: 'node', name: 'node', port: defaultPorts.node });
+      } else {
+        const countAns = await prompts({
+          type: 'number',
+          name: 'svcCount',
+          message: 'How many services do you want to create?',
+          initial: 1,
+          min: 1,
+          validate: v => Number.isInteger(v) && v > 0 && v <= 50 ? true : 'Enter a positive integer (max 50)'
+        });
+        const svcCount = countAns.svcCount || 1;
+        for (let i = 0; i < svcCount; i++) {
         const typeAns = await prompts({
           type: 'select',
           name: 'svcType',
@@ -238,41 +220,6 @@ export async function scaffoldMonorepo(projectNameArg, options) {
           }
         }
         services.push({ type: svcType, name: svcName, port: svcPort });
-      }
-    }
-
-    // Always allow customization of name & port in interactive mode (not nonInteractive)
-    if (!nonInteractive) {
-      for (let i = 0; i < services.length; i++) {
-        const svc = services[i];
-        const rename = await prompts({
-          type: 'text',
-          name: 'newName',
-          message: `Name for ${svc.type} service (leave blank to keep '${svc.name}'):`,
-          validate: v => !v || (/^[a-zA-Z0-9._-]+$/.test(v) ? true : 'Use alphanumerics, dash, underscore, dot')
-        });
-        if (rename.newName && rename.newName !== svc.name) {
-          if (reservedNames.has(rename.newName)) {
-            console.log(chalk.red(`Name '${rename.newName}' is reserved. Keeping '${svc.name}'.`));
-          } else if (services.find(s => s !== svc && s.name === rename.newName)) {
-            console.log(chalk.red(`Name '${rename.newName}' already used. Keeping '${svc.name}'.`));
-          } else {
-            svc.name = rename.newName;
-          }
-        }
-        const portResp = await prompts({
-          type: 'text',
-          name: 'newPort',
-          message: `Port for ${svc.name} (${svc.type}) (default ${svc.port}):`,
-          validate: v => !v || (/^\d+$/.test(v) && +v > 0 && +v <= 65535) ? true : 'Enter a valid port 1-65535'
-        });
-        if (portResp.newPort) {
-          const newPort = Number(portResp.newPort);
-            if (services.find(s => s !== svc && s.port === newPort)) {
-              console.log(chalk.red(`Port ${newPort} already used; keeping ${svc.port}.`));
-            } else {
-              svc.port = newPort;
-            }
         }
       }
     }
