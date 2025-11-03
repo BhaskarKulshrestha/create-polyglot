@@ -19,7 +19,7 @@ describe('GitHub Actions workflow generation', () => {
   it('creates a ci.yml when --with-actions passed', async () => {
     const repoRoot = process.cwd();
     const cliPath = path.join(repoRoot, 'bin/index.js');
-    await execa('node', [cliPath, projName, '--services', 'node', '--no-install', '--with-actions', '--yes'], { cwd: tmpDir });
+  await execa('node', [cliPath, 'init', projName, '--services', 'node', '--no-install', '--with-actions', '--yes'], { cwd: tmpDir });
     const wfPath = path.join(tmpDir, projName, '.github', 'workflows', 'ci.yml');
     expect(fs.existsSync(wfPath)).toBe(true);
     const content = fs.readFileSync(wfPath, 'utf-8');

@@ -118,6 +118,11 @@ export async function scaffoldMonorepo(projectNameArg, options) {
     options.packageManager = options.packageManager || answers.packageManager || 'npm';
     if (options.git === undefined) options.git = answers.git;
   if (options.withActions === undefined) options.withActions = answers.withActions;
+    // Commander defines '--no-install' as option 'install' defaulting to true, false when flag passed.
+    if (Object.prototype.hasOwnProperty.call(options, 'install')) {
+      // Normalize to legacy noInstall boolean used below.
+      options.noInstall = options.install === false;
+    }
 
     console.log(chalk.cyanBright(`\n🚀 Creating ${projectName} monorepo...\n`));
 
@@ -451,7 +456,8 @@ export async function scaffoldMonorepo(projectNameArg, options) {
     }
 
     const pm = options.packageManager || 'npm';
-    if (!options.noInstall) {
+    // Commander maps --no-install to options.install = false
+    if (options.install !== false) {
       console.log(chalk.cyan(`\n📦 Installing root dependencies using ${pm}...`));
       const installCmd = pm === 'yarn' ? ['install'] : pm === 'pnpm' ? ['install'] : pm === 'bun' ? ['install'] : ['install'];
       try {
@@ -492,7 +498,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
     printBoxMessage([
       '🎉 Monorepo setup complete!',
       `cd ${projectName}`,
-      options.noInstall ? `${pm} install` : '',
+      options.install === false ? `${pm} install` : '',
       `${pm} run list:services   # quick list (fancy table)`,
       `${pm} run dev             # run local node/frontend services`,
       'docker compose up --build# run all via docker',
