@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'node:child_process';
 import chalk from 'chalk';
+import _ from 'lodash';
 
 // Log levels and their colors
 const LOG_LEVELS = {
@@ -121,7 +122,8 @@ async function readLogsFromFile(filePath, options = {}) {
   }
   
   if (options.filter) {
-    const regex = new RegExp(options.filter, 'i');
+    const safeFilter = _.escapeRegExp(options.filter);
+    const regex = new RegExp(safeFilter, 'i');
     logs = logs.filter(log => regex.test(log.message) || regex.test(log.raw));
   }
   
