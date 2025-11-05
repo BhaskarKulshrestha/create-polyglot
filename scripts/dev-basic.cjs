@@ -1,36 +1,3 @@
-#!/usr/bin/env node
-// ---------------------------------------------------------------------------
-// Basic Multi-Service Dev Runner
-// ---------------------------------------------------------------------------
-// Purpose:
-//   Lightweight script to start each service's "dev" script in parallel when
-//   you are NOT using an advanced orchestrator (like Turborepo or Nx).
-//   Intended for the scaffold's "basic" preset.
-//
-// High-Level Flow:
-//   1. Identify the root directory and the conventional services/ folder.
-//   2. Detect which JavaScript package manager to use (npm / pnpm / yarn / bun).
-//   3. Enumerate each subfolder in services/.
-//   4. For every folder containing a package.json with a dev script, spawn it.
-//   5. Stream each child process' output with a readable prefix.
-//
-// Design Constraints:
-//   - Zero external dependencies (Node built‑ins only) to stay portable.
-//   - Does NOT attempt file-change restarts (leave that to each service's own
-//     tooling, e.g. nodemon, ts-node-dev, next dev, etc.).
-//   - Ignores non-Node services (e.g., Go, Python, Java) since they don't have
-//     a package.json dev script; those are expected to run via their own tools.
-//   - CommonJS for maximum compatibility regardless of root "type: module".
-//
-// Extending Tips:
-//   - To include non-Node services, add detection logic (e.g., main.go, pom.xml)
-//     and spawn the appropriate commands.
-//   - To implement auto-restart, consider integrating chokidar to watch files
-//     and restart specific child processes.
-//   - To add coloring per service, map service names to a color palette and
-//     wrap the prefix() output (keep it optional for plain CI logs).
-// ---------------------------------------------------------------------------
-
 const { spawn } = require('node:child_process');
 const fs = require('fs');
 const path = require('path');
@@ -46,6 +13,115 @@ if (!fs.existsSync(servicesDir)) {
   console.warn('⚠️  services/ directory not found. No local services will be started.');
   process.exit(0);
 }
+
+// Initialize logging for all services
+function initializeLogging() {
+  const services = fs.readdirSync(servicesDir);
+  services.forEach(svc => {
+    const svcPath = path.join(servicesDir, svc);
+    const logsDir = path.join(svcPath, '.logs');
+    
+    // Create logs directory
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+    
+    // Create logger helper
+    const loggerPath = path.join(logsDir, 'logger.js');
+    if (!fs.existsSync(loggerPath)) {
+      const loggerHelper = `// Auto-generated logger helper for polyglot services
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const LOG_LEVELS = {
+  error: 4,
+  warn: 3,
+  info: 2,
+  debug: 1
+};
+
+export class Logger {
+  constructor(serviceName = 'unknown') {
+    this.serviceName = serviceName;
+    this.logsDir = __dirname;
+  }
+  
+  log(level, message, data = {}) {
+    try {
+      const logEntry = {
+        timestamp: new Date().toISOString(),
+        level: level.toLowerCase(),
+        service: this.serviceName,
+        message: String(message),
+        data
+      };
+      
+      const dateStr = new Date().toISOString().split('T')[0];
+      const logFile = path.join(this.logsDir, \`\${dateStr}.log\`);
+      const logLine = JSON.stringify(logEntry) + '\\n';
+      
+      fs.appendFileSync(logFile, logLine);
+    } catch (e) {
+      console.error('Failed to write log:', e.message);
+    }
+  }
+  
+  error(message, data) { this.log('error', message, data); }
+  warn(message, data) { this.log('warn', message, data); }
+  info(message, data) { this.log('info', message, data); }
+  debug(message, data) { this.log('debug', message, data); }
+}
+`;
+      fs.writeFileSync(loggerPath, loggerHelper);
+    }
+  });
+}
+
+// Start admin dashboard
+function startAdminDashboard() {
+  console.log('🎛️  Starting admin dashboard...');
+  
+  // Try to find create-polyglot globally or in node_modules
+  let adminCmd = 'npx';
+  let adminArgs = ['create-polyglot', 'admin', '--port', '9000'];
+  
+  // Fallback: check if create-polyglot is available globally
+  try {
+    const { execSync } = require('child_process');
+    execSync('which create-polyglot', { stdio: 'ignore' });
+    adminCmd = 'create-polyglot';
+    adminArgs = ['admin', '--port', '9000'];
+  } catch (e) {
+    // Use npx as fallback
+  }
+  
+  const adminProcess = spawn(adminCmd, adminArgs, {
+    cwd: root,
+    env: process.env,
+    stdio: 'pipe'
+  });
+  
+  adminProcess.stdout.on('data', d => process.stdout.write(`[admin] ${d}`));
+  adminProcess.stderr.on('data', d => process.stderr.write(`[admin] ${d}`));
+  adminProcess.on('exit', code => {
+    if (code !== 0) {
+      console.log(`[admin] Admin dashboard failed to start (code ${code}). Continuing without dashboard...`);
+    }
+  });
+  
+  // Don't fail the whole process if admin fails
+  adminProcess.on('error', (err) => {
+    console.log(`[admin] Admin dashboard not available: ${err.message}. Continuing without dashboard...`);
+  });
+  
+  return adminProcess;
+}
+
+// Initialize logging for all services
+initializeLogging();
 
 // Snapshot the list of entries inside services/ (folders assumed to be services)
 const services = fs.readdirSync(servicesDir);
@@ -73,6 +149,10 @@ console.log(`Discovered services: ${services.join(', ')}`);
 
 // Keep references to spawned child processes so we can forward signals.
 const procs = [];
+
+// Start admin dashboard first
+const adminProc = startAdminDashboard();
+procs.push(adminProc);
 
 function prefix(name, data) {
   // Prepend the service name to each line of output for readability.

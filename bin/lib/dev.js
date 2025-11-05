@@ -3,6 +3,47 @@ import path from 'path';
 import chalk from 'chalk';
 import { spawn } from 'node:child_process';
 import http from 'http';
+import { initializeServiceLogs } from './logs.js';
+
+// Start admin dashboard
+function startAdminDashboard(cwd) {
+  console.log(chalk.cyan('🎛️  Starting admin dashboard on http://localhost:9000'));
+  
+  // Try to find create-polyglot command
+  let adminCmd = 'npx';
+  let adminArgs = ['create-polyglot', 'admin', '--port', '9000'];
+  
+  // Try global command first
+  try {
+    const { execSync } = require('child_process');
+    execSync('which create-polyglot', { stdio: 'ignore' });
+    adminCmd = 'create-polyglot';
+    adminArgs = ['admin', '--port', '9000'];
+  } catch (e) {
+    // Use npx as fallback
+  }
+  
+  const adminProcess = spawn(adminCmd, adminArgs, {
+    cwd,
+    env: process.env,
+    stdio: 'pipe'
+  });
+  
+  adminProcess.stdout.on('data', d => process.stdout.write(chalk.magenta(`[admin] `) + d.toString()));
+  adminProcess.stderr.on('data', d => process.stderr.write(chalk.magenta(`[admin] `) + d.toString()));
+  adminProcess.on('exit', code => {
+    if (code !== 0) {
+      console.log(chalk.yellow(`[admin] Admin dashboard failed to start (code ${code}). Continuing without dashboard...`));
+    }
+  });
+  
+  // Don't fail the whole process if admin fails  
+  adminProcess.on('error', (err) => {
+    console.log(chalk.yellow(`[admin] Admin dashboard not available: ${err.message}. Continuing without dashboard...`));
+  });
+  
+  return adminProcess;
+}
 
 function colorFor(name) {
   const colors = [chalk.cyan, chalk.magenta, chalk.green, chalk.blue, chalk.yellow, chalk.redBright];
@@ -51,8 +92,23 @@ export async function runDev({ docker=false } = {}) {
     return;
   }
   console.log(chalk.cyan('🚀 Starting services locally (best effort)...'));
+  
+  // Initialize logging for all services
+  if (fs.existsSync(servicesDir)) {
+    for (const svc of cfg.services) {
+      const svcPath = path.join(cwd, svc.path);
+      if (fs.existsSync(svcPath)) {
+        initializeServiceLogs(svcPath);
+      }
+    }
+  }
+  
   const procs = [];
   const healthPromises = [];
+
+  // Start admin dashboard
+  const adminProc = startAdminDashboard(cwd);
+  procs.push(adminProc);
 
 if (fs.existsSync(servicesDir)) {
   for (const svc of cfg.services) {

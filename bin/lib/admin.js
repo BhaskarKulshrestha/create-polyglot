@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import http from 'http';
 import crypto from 'crypto';
 import { spawn } from 'node:child_process';
-import { getLogsForAPI } from './logs.js';
+import { getLogsForAPI, LogFileWatcher } from './logs.js';
  
 // Simple WebSocket implementation for real-time log streaming
 function handleWebSocketUpgrade(request, socket, head) {
@@ -65,9 +65,10 @@ function handleWebSocketUpgrade(request, socket, head) {
   });
   
   socket.on('close', () => {
-    // Clean up any active log watchers for this socket
-    if (socket.logWatcher) {
-      socket.logWatcher.cleanup();
+    // Clean up any active log stream listeners for this socket
+    if (socket.logUnsubscribe) {
+      socket.logUnsubscribe();
+      socket.logUnsubscribe = null;
     }
   });
 }
@@ -84,27 +85,76 @@ function sendWebSocketMessage(socket, message) {
   socket.write(frame);
 }
 
+// Global log watcher instance
+let globalLogWatcher = null;
+
 function handleWebSocketMessage(socket, message) {
   if (message.type === 'start_log_stream') {
     // Start streaming logs for specified service
     const serviceName = message.service;
-    // For now, just send initial logs - real streaming would require file watching
-    getLogsForAPI(serviceName, { tail: 50 })
-      .then(logs => {
-        sendWebSocketMessage(socket, {
-          type: 'log_data',
-          service: serviceName,
-          logs: logs
-        });
-      })
-      .catch(err => {
-        sendWebSocketMessage(socket, {
-          type: 'error',
-          message: 'Failed to fetch logs: ' + err.message
-        });
+    
+    // Send initial logs from watcher cache
+    if (globalLogWatcher) {
+      const logs = globalLogWatcher.getCurrentLogs(serviceName, { tail: 100 });
+      sendWebSocketMessage(socket, {
+        type: 'log_data',
+        service: serviceName,
+        logs: logs
       });
+      
+      // Set up listener for real-time updates
+      setupLogStreamListener(socket, serviceName);
+    } else {
+      sendWebSocketMessage(socket, {
+        type: 'error',
+        message: 'Log watcher not initialized'
+      });
+    }
+  } else if (message.type === 'stop_log_stream') {
+    // Stop streaming logs
+    if (socket.logUnsubscribe) {
+      socket.logUnsubscribe();
+      socket.logUnsubscribe = null;
+    }
   }
 }
+
+// Set up listener for real-time log updates
+function setupLogStreamListener(socket, serviceName) {
+  if (!globalLogWatcher) return;
+  
+  // Remove existing listener if any
+  if (socket.logUnsubscribe) {
+    socket.logUnsubscribe();
+  }
+  
+  // Add new listener
+  socket.logUnsubscribe = globalLogWatcher.addListener((event, data) => {
+    // Filter by service if specified
+    if (serviceName && data.service !== serviceName) return;
+    
+    if (event === 'logsUpdated') {
+      sendWebSocketMessage(socket, {
+        type: 'log_update',
+        service: data.service,
+        logs: data.logs.map(log => ({
+          timestamp: log.timestamp instanceof Date ? log.timestamp.toISOString() : log.timestamp,
+          level: log.level,
+          service: log.service,
+          message: log.message,
+          data: log.data
+        })),
+        event: data.event
+      });
+    } else if (event === 'logsCleared') {
+      sendWebSocketMessage(socket, {
+        type: 'logs_cleared',
+        service: data.service
+      });
+    }
+  });
+}
+
 async function checkServiceStatus(service) {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
@@ -301,32 +351,25 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       initializeLogs();
     });
     
-    // Logs functionality
+    // Logs functionality (auto-stream)
     let currentLogsFilter = {};
-    let logsAutoRefresh = false;
-    let logsRefreshInterval;
     let wsConnection = null;
+    let allLogsCache = [];
     
     function initializeLogs() {
-      const refreshBtn = document.querySelector('#logs-refresh');
-      const autoRefreshBtn = document.querySelector('#logs-auto-refresh');
       const clearBtn = document.querySelector('#logs-clear');
       const exportBtn = document.querySelector('#logs-export');
-      const streamBtn = document.querySelector('#logs-stream');
       const serviceFilter = document.querySelector('#logs-service-filter');
       const levelFilter = document.querySelector('#logs-level-filter');
       const searchInput = document.querySelector('#logs-search');
       
-      refreshBtn?.addEventListener('click', fetchLogs);
-      autoRefreshBtn?.addEventListener('click', toggleAutoRefresh);
-      streamBtn?.addEventListener('click', toggleLogStream);
       clearBtn?.addEventListener('click', clearLogs);
       exportBtn?.addEventListener('click', exportLogs);
       serviceFilter?.addEventListener('change', updateLogsFilter);
       levelFilter?.addEventListener('change', updateLogsFilter);
       searchInput?.addEventListener('input', debounce(updateLogsFilter, 500));
       
-      fetchLogs(); // Initial load
+      startLogStream();
     }
     
     function initWebSocket() {
@@ -355,10 +398,14 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       wsConnection.onclose = function() {
         console.log('WebSocket disconnected');
         wsConnection = null;
+        isStreamingLogs = false;
+        updateStreamButton();
       };
       
       wsConnection.onerror = function(error) {
         console.error('WebSocket error:', error);
+        isStreamingLogs = false;
+        updateStreamButton();
       };
       
       return wsConnection;
@@ -366,37 +413,29 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
     
     function handleWebSocketMessage(data) {
       if (data.type === 'log_data') {
-        renderLogs(data.logs);
+        allLogsCache = data.logs.slice();
+        renderLogs(applyClientFilters(allLogsCache));
+      } else if (data.type === 'log_update') {
+        allLogsCache = allLogsCache.concat(data.logs);
+        if (allLogsCache.length > 5000) allLogsCache = allLogsCache.slice(-5000);
+        renderLogs(applyClientFilters(allLogsCache));
+      } else if (data.type === 'logs_cleared') {
+        allLogsCache = allLogsCache.filter(l => l.service !== data.service);
+        renderLogs(applyClientFilters(allLogsCache));
       } else if (data.type === 'error') {
         renderLogsError(data.message);
       }
     }
     
-    function toggleLogStream() {
-      const btn = document.querySelector('#logs-stream');
-      if (!btn) return;
-      
-      if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) {
-        initWebSocket();
-        btn.textContent = 'Stop Stream';
-        btn.style.background = '#dc2626';
-        
-        // Start streaming for current service filter
-        const serviceFilter = document.querySelector('#logs-service-filter');
-        const service = serviceFilter?.value || null;
-        
-        wsConnection.onopen = function() {
-          wsConnection.send(JSON.stringify({
-            type: 'start_log_stream',
-            service: service
-          }));
-        };
-      } else {
-        wsConnection.close();
-        btn.textContent = 'Live Stream';
-        btn.style.background = '#0369a1';
-      }
+    function startLogStream() {
+      const ws = initWebSocket();
+      const serviceFilter = document.querySelector('#logs-service-filter');
+      const service = serviceFilter?.value || null;
+      const sendStart = () => ws.send(JSON.stringify({ type: 'start_log_stream', service }));
+      if (ws.readyState === WebSocket.OPEN) sendStart(); else ws.onopen = sendStart;
     }
+    
+    // Removed stop/toggle/update stream button functions (always streaming)
     
     function updateLogsFilter() {
       const serviceFilter = document.querySelector('#logs-service-filter');
@@ -409,27 +448,22 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
         filter: searchInput?.value || ''
       };
       
-      fetchLogs();
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        wsConnection.send(JSON.stringify({ type: 'start_log_stream', service: currentLogsFilter.service || null }));
+      }
+      renderLogs(applyClientFilters(allLogsCache));
     }
     
-    async function fetchLogs() {
-      try {
-        const params = new URLSearchParams();
-        params.set('tail', '100');
-        
-        if (currentLogsFilter.service) params.set('service', currentLogsFilter.service);
-        if (currentLogsFilter.level) params.set('level', currentLogsFilter.level);
-        if (currentLogsFilter.filter) params.set('filter', currentLogsFilter.filter);
-        
-        const res = await fetch('/api/logs?' + params.toString());
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        
-        const logs = await res.json();
-        renderLogs(logs);
-      } catch (e) {
-        console.error('Failed to fetch logs:', e);
-        renderLogsError('Failed to fetch logs: ' + e.message);
+    // Client-side filtering of cached logs
+    function applyClientFilters(logs) {
+      let filtered = logs.slice();
+      if (currentLogsFilter.service) filtered = filtered.filter(l => l.service === currentLogsFilter.service);
+      if (currentLogsFilter.level) filtered = filtered.filter(l => l.level === currentLogsFilter.level);
+      if (currentLogsFilter.filter) {
+        const re = new RegExp(currentLogsFilter.filter, 'i');
+        filtered = filtered.filter(l => re.test(l.message) || re.test(JSON.stringify(l.data || {})));
       }
+      return filtered.slice(-1000);
     }
     
     function renderLogs(logs) {
@@ -456,27 +490,12 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       container.scrollTop = container.scrollHeight; // Auto-scroll to bottom
     }
     
+    // appendLogs removed; updates re-render entire filtered set
+    
     function renderLogsError(message) {
       const container = document.querySelector('#logs-container');
       if (container) {
         container.innerHTML = '<div class="logs-empty" style="color:#f87171;">' + escapeHtml(message) + '</div>';
-      }
-    }
-    
-    function toggleAutoRefresh() {
-      const btn = document.querySelector('#logs-auto-refresh');
-      if (!btn) return;
-      
-      logsAutoRefresh = !logsAutoRefresh;
-      
-      if (logsAutoRefresh) {
-        btn.textContent = 'Stop Auto-Refresh';
-        btn.style.background = '#dc2626';
-        logsRefreshInterval = setInterval(fetchLogs, 3000);
-      } else {
-        btn.textContent = 'Auto-Refresh';
-        btn.style.background = '#0369a1';
-        clearInterval(logsRefreshInterval);
       }
     }
     
@@ -589,9 +608,7 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
               <option value="debug">Debug</option>
             </select>
             <input type="text" id="logs-search" placeholder="Search logs..." style="width:150px;">
-            <button id="logs-refresh">Refresh</button>
-            <button id="logs-auto-refresh" class="secondary">Auto-Refresh</button>
-            <button id="logs-stream" class="secondary">Live Stream</button>
+              <!-- Live Stream button removed: streaming now always on -->
             <button id="logs-export" class="secondary">Export</button>
             <button id="logs-clear" class="secondary">Clear</button>
           </div>
@@ -627,6 +644,15 @@ export async function startAdminDashboard(options = {}) {
   console.log(chalk.gray(`   Dashboard URL: http://localhost:${port}`));
   console.log(chalk.gray(`   Refresh interval: ${refreshInterval / 1000}s`));
   console.log(chalk.yellow('   Press Ctrl+C to stop\n'));
+
+  // Initialize log file watcher
+  globalLogWatcher = new LogFileWatcher(cwd);
+  try {
+    await globalLogWatcher.startWatching();
+  } catch (error) {
+    console.warn(chalk.yellow('⚠️  Failed to start log file watcher:', error.message));
+    console.log(chalk.gray('   Logs will be read from files on demand'));
+  }
   
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
@@ -643,7 +669,7 @@ export async function startAdminDashboard(options = {}) {
     }
     
     if (url.pathname === '/api/logs') {
-      // API endpoint for logs
+      // API endpoint for logs using log watcher cache
       try {
         const serviceName = url.searchParams.get('service');
         const tail = url.searchParams.get('tail') || '100';
@@ -651,12 +677,23 @@ export async function startAdminDashboard(options = {}) {
         const since = url.searchParams.get('since');
         const filter = url.searchParams.get('filter');
         
-        const logs = await getLogsForAPI(serviceName, {
-          tail: parseInt(tail),
-          level,
-          since,
-          filter
-        });
+        let logs = [];
+        if (globalLogWatcher) {
+          logs = globalLogWatcher.getCurrentLogs(serviceName, {
+            tail: parseInt(tail),
+            level,
+            since,
+            filter
+          });
+        } else {
+          // Fallback to file reading if watcher not available
+          logs = await getLogsForAPI(serviceName, {
+            tail: parseInt(tail),
+            level,
+            since,
+            filter
+          });
+        }
         
         res.writeHead(200, {
           'Content-Type': 'application/json',
@@ -664,6 +701,7 @@ export async function startAdminDashboard(options = {}) {
         });
         res.end(JSON.stringify(logs, null, 2));
       } catch (e) {
+        console.error('❌ Logs API error:', e.message);
         res.writeHead(500, {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*'
@@ -702,12 +740,39 @@ export async function startAdminDashboard(options = {}) {
   });
   
   // Graceful shutdown
-  process.on('SIGINT', () => {
-    console.log(chalk.yellow('\n🛑 Shutting down Admin Dashboard...'));
-    server.close(() => {
-      console.log(chalk.green('✅ Dashboard stopped'));
-      process.exit(0);
-    });
+  let shuttingDown = false;
+  const gracefulShutdown = (signal = 'SIGINT') => {
+    if (shuttingDown) return; // prevent duplicate invocation
+    shuttingDown = true;
+    console.log(chalk.yellow(`\n🛑 (${signal}) Shutting down Admin Dashboard...`));
+
+    // Stop log watcher if active
+    if (globalLogWatcher) {
+      try {
+        globalLogWatcher.stopWatching();
+      } catch (e) {
+        console.warn(chalk.yellow('⚠️  Error stopping log watcher:'), e.message);
+      }
+      globalLogWatcher = null;
+    }
+
+    // Close HTTP server
+    try {
+      server.close(() => {
+        console.log(chalk.green('✅ Dashboard stopped'));
+        process.exit(0);
+      });
+    } catch (e) {
+      console.error(chalk.red('❌ Error during server shutdown:'), e.message);
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  // Fallback: if event loop is about to exit naturally, ensure resources cleaned
+  process.on('beforeExit', () => {
+    if (!shuttingDown) gracefulShutdown('beforeExit');
   });
   
   // Log service status updates periodically

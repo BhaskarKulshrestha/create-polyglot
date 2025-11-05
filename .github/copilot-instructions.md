@@ -63,5 +63,87 @@ Purpose: This repo is a CLI (`bin/index.js`) that scaffolds a polyglot monorepo 
 
 If adding major refactors (e.g., splitting CLI), document new module boundaries here.
 
+## Admin Dashboard & Log Streaming (Updated)
+The admin dashboard (`startAdminDashboard` in `bin/lib/admin.js`) now uses a chokidar-powered file watcher for real-time service logs.
+
+### Log Watching Implementation
+- Class: `LogFileWatcher` in `bin/lib/logs.js`.
+- Dependency added: `chokidar` (installed in root `package.json`).
+- Watches each service's `.logs/*.log` files (supports both legacy `apps/<service>` and new `services/<service>` paths).
+- Maintains an in-memory cache (`serviceLogsCache`) with latest logs per service (capped to 1000 per service when merging updates).
+- Emits events to listeners: `logsUpdated` (with `event: add|change`), `logsCleared` (on file deletion).
+
+### WebSocket Protocol (Simplified)
+- Endpoint: `/ws` (still a minimal custom implementation—no external WS library).
+- Client sends `{ type: 'start_log_stream', service: <optionalServiceName|null> }` to (re)subscribe.
+- Server pushes messages:
+	- `log_data`: initial batch (tail 100) for requested service or all services.
+	- `log_update`: incremental updates (new lines) as files change.
+	- `logs_cleared`: emitted when a log file is deleted (e.g., rotation/cleanup).
+	- `error`: watcher or processing failures.
+
+### Removed UI Elements / Behavior
+- Manual "Refresh" and "Live Stream" buttons removed; streaming starts automatically on page load.
+- No explicit "Start/Stop" toggling—connection auto-reconnects with exponential backoff on disconnect.
+- Filtering (service, level, search text) is applied client-side against the cached `allLogsCache`.
+- Re-sending `start_log_stream` with a new service filter requests a narrower set without page reload.
+
+### Server-Side Changes
+- `globalLogWatcher` initialized when dashboard starts; falls back gracefully if initialization fails.
+- `/api/logs` now serves from watcher cache if available (still present for manual export and any non-WS consumers).
+
+### Client-Side Changes (`admin.js` embedded script)
+- Removed functions: `fetchLogs`, `toggleLogStream`, `stopLogStream`, `updateStreamButton`, incremental DOM `appendLogs` logic.
+- Added in-memory `allLogsCache` and `applyClientFilters()` for dynamic filtering without refetch.
+- Reconnect logic retains filters by re-sending latest `start_log_stream` payload on open.
+
+### Considerations / Future Enhancements
+- Potential optimization: send only new log line(s) instead of array (currently small overhead acceptable).
+- Add backend endpoint for clearing logs (currently UI shows confirmation but warns unimplemented).
+- Could expose a `since` param in WebSocket start message for time-based tailing.
+- Log rotation: `cleanupOldLogs` keeps most recent 10 daily files; watcher handles file add/delete events transparently.
+
+### Pitfalls to Avoid When Extending
+- If introducing batching: ensure not to stall UI; prefer immediate push for smaller latency.
+- When adjusting max cache size, reflect limits both server-side (merge logic) and client-side (slice for rendering).
+- Avoid blocking operations in watcher event handler; heavy parsing should be deferred if logs grow large.
+
+### Testing Notes
+- Existing Vitest suite did not reference removed buttons; no test changes required.
+- For new tests: simulate writing to `.logs/<date>.log` and assert WebSocket `log_update` is received (could add an integration test harness later).
+
+Update this section if log streaming protocol or watcher boundaries change.
+
+## CLI Usage Summary (Reference)
+For detailed, user-facing examples see the README (search for "Quick Start", "Commands"). This section is a concise operator guide.
+
+Primary commands:
+- `create-polyglot init <name> [flags]` – Scaffold a new workspace. Flags: `-s, --services`, `--preset <turbo|nx|none>`, `--package-manager <npm|pnpm|yarn|bun>`, `--git`, `--yes`, `--frontend-generator`.
+- `create-polyglot add service <name> --type <node|python|go|java|frontend> [--port <p>] [--yes]` – Append a service to an existing workspace.
+- `create-polyglot dev [--docker]` – Local dev runner (frontend + node by default). With `--docker` delegates to Docker Compose for all services.
+- `create-polyglot hot [--services a,b] [--dry-run]` – Unified hot reload orchestrator across selected services.
+- `create-polyglot admin [--port <p>] [--open false]` – Start admin dashboard (status + real-time logs).
+- `create-polyglot logs [<service>] [--tail <n>] [--level <error|warn|info|debug>] [--filter <regex>] [--since <relative|ISO>] [--clear]` – CLI log viewing / maintenance.
+
+Behavior notes:
+- `init` writes `polyglot.json` manifest which powers all subsequent commands.
+- Port uniqueness enforced during `init` and `add service`; collisions abort early.
+- `hot` uses language-specific runners (e.g. Node via `nodemon` or custom; Python via `uvicorn`; Go recompile; Java Spring Boot restart) aggregated in a single multiplexed output.
+- `admin` now auto-streams logs (no refresh or manual toggle) leveraging `LogFileWatcher` + WebSocket events described above.
+- `logs --clear` performs per-service log directory cleanup (invokes helper in `logs.js`). Non-critical failures warn.
+- `dev --docker` assumes generated Dockerfiles; if one is missing for a service, generation logic from scaffold covers it.
+
+Error handling conventions:
+- Hard validation failures → red emoji + `process.exit(1)` prior to partial writes.
+- Soft failures (git init, dependency install, external generators) log yellow warning and continue.
+
+Testing guidance:
+- Prefer `execa` for invoking CLI within tests; set generous timeouts (≥30s) for Next.js or Java operations.
+- For admin log stream tests, you can simulate writes to `.logs/<date>.log` then assert WebSocket `log_update` message.
+
+When extending:
+- Add new command flags in `bin/index.js` commander chain; reflect in README and this summary.
+- Keep README examples authoritative; this section should remain concise.
+
 ---
 Feedback: Let me know if any sections need more depth (e.g., Docker generation, prompt flow, adding new presets) or if emerging conventions should be captured.

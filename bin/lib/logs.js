@@ -3,6 +3,7 @@ import path from 'path';
 import { spawn } from 'node:child_process';
 import chalk from 'chalk';
 import _ from 'lodash';
+import chokidar from 'chokidar';
 
 // Log levels and their colors
 const LOG_LEVELS = {
@@ -485,8 +486,11 @@ export function initializeServiceLogs(serviceDir) {
   // Create a simple logging helper file for the service
   const loggerHelperPath = path.join(serviceDir, '.logs', 'logger.js');
   const loggerHelper = `// Auto-generated logger helper for polyglot services
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const LOG_LEVELS = {
   error: 4,
@@ -495,10 +499,10 @@ const LOG_LEVELS = {
   debug: 1
 };
 
-class Logger {
+export class Logger {
   constructor(serviceName = 'unknown') {
     this.serviceName = serviceName;
-    this.logsDir = path.join(__dirname);
+    this.logsDir = __dirname;
   }
   
   log(level, message, data = {}) {
@@ -526,8 +530,6 @@ class Logger {
   info(message, data) { this.log('info', message, data); }
   debug(message, data) { this.log('debug', message, data); }
 }
-
-module.exports = { Logger };
 `;
   
   if (!fs.existsSync(loggerHelperPath)) {
@@ -554,10 +556,17 @@ export async function getLogsForAPI(serviceName = null, options = {}) {
   let allLogs = [];
   
   for (const service of targetServices) {
-    const serviceDir = path.join(cwd, 'apps', service.name);
-    const logs = await readServiceLogs(serviceDir, options);
-    logs.forEach(log => log.service = service.name);
-    allLogs = allLogs.concat(logs);
+    // Check both services/ (new) and apps/ (legacy) directories
+    let serviceDir = path.join(cwd, 'services', service.name);
+    if (!fs.existsSync(serviceDir)) {
+      serviceDir = path.join(cwd, 'apps', service.name);
+    }
+    
+    if (fs.existsSync(serviceDir)) {
+      const logs = await readServiceLogs(serviceDir, options);
+      logs.forEach(log => log.service = service.name);
+      allLogs = allLogs.concat(logs);
+    }
   }
   
   allLogs.sort((a, b) => a.timestamp - b.timestamp);
@@ -569,4 +578,257 @@ export async function getLogsForAPI(serviceName = null, options = {}) {
     message: log.message,
     data: log.data
   }));
+}
+
+// Chokidar-based log file watcher for real-time monitoring
+export class LogFileWatcher {
+  constructor(workspacePath) {
+    this.workspacePath = workspacePath;
+    this.watcher = null;
+    this.listeners = new Set();
+    this.serviceLogsCache = new Map(); // Cache for current logs per service
+    this.isWatching = false;
+  }
+
+  // Start watching log files
+  async startWatching() {
+    if (this.isWatching) return;
+    
+    const configPath = path.join(this.workspacePath, 'polyglot.json');
+    if (!fs.existsSync(configPath)) {
+      throw new Error('polyglot.json not found in workspace');
+    }
+
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const watchPaths = [];
+
+    // Determine watch paths for all services
+    for (const service of cfg.services) {
+      // Check both services/ (new) and apps/ (legacy) directories
+      let serviceDir = path.join(this.workspacePath, 'services', service.name);
+      if (!fs.existsSync(serviceDir)) {
+        serviceDir = path.join(this.workspacePath, 'apps', service.name);
+      }
+      
+      if (fs.existsSync(serviceDir)) {
+        const logsDir = getLogsDir(serviceDir);
+        if (fs.existsSync(logsDir)) {
+          watchPaths.push(path.join(logsDir, '*.log'));
+        }
+      }
+    }
+
+    if (watchPaths.length === 0) {
+      console.warn('No log directories found to watch');
+      return;
+    }
+
+    // Initialize cache with current logs
+    await this.loadInitialLogs(cfg.services);
+
+    // Start chokidar watcher
+    this.watcher = chokidar.watch(watchPaths, {
+      ignored: /(^|[\/\\])\../, // ignore dotfiles
+      persistent: true,
+      ignoreInitial: false
+    });
+
+    this.watcher
+      .on('add', (filePath) => this.handleFileChange('add', filePath))
+      .on('change', (filePath) => this.handleFileChange('change', filePath))
+      .on('unlink', (filePath) => this.handleFileChange('unlink', filePath))
+      .on('error', (error) => console.error('Log watcher error:', error));
+
+    this.isWatching = true;
+    console.log(chalk.green('📁 Started watching log files with chokidar'));
+  }
+
+  // Stop watching log files
+  stopWatching() {
+    if (this.watcher) {
+      this.watcher.close();
+      this.watcher = null;
+    }
+    this.isWatching = false;
+    this.listeners.clear();
+    this.serviceLogsCache.clear();
+    console.log(chalk.yellow('📁 Stopped watching log files'));
+  }
+
+  // Load initial logs for all services
+  async loadInitialLogs(services) {
+    for (const service of services) {
+      // Check both services/ (new) and apps/ (legacy) directories
+      let serviceDir = path.join(this.workspacePath, 'services', service.name);
+      if (!fs.existsSync(serviceDir)) {
+        serviceDir = path.join(this.workspacePath, 'apps', service.name);
+      }
+      
+      if (fs.existsSync(serviceDir)) {
+        try {
+          const logs = await readServiceLogs(serviceDir, { tail: 100 });
+          logs.forEach(log => log.service = service.name);
+          this.serviceLogsCache.set(service.name, logs);
+        } catch (error) {
+          console.error(`Failed to load initial logs for ${service.name}:`, error);
+        }
+      }
+    }
+  }
+
+  // Handle file changes
+  async handleFileChange(event, filePath) {
+    try {
+      const serviceName = this.getServiceNameFromLogPath(filePath);
+      if (!serviceName) return;
+
+      if (event === 'unlink') {
+        // File deleted - clear cache for this service
+        this.serviceLogsCache.delete(serviceName);
+        this.notifyListeners('logsCleared', { service: serviceName });
+        return;
+      }
+
+      // Read new logs and update cache
+      const logs = await this.readLogsFromPath(filePath, serviceName);
+      const existingLogs = this.serviceLogsCache.get(serviceName) || [];
+      
+      if (event === 'add') {
+        // New log file - replace existing logs
+        this.serviceLogsCache.set(serviceName, logs);
+        this.notifyListeners('logsUpdated', { 
+          service: serviceName, 
+          logs, 
+          event: 'add' 
+        });
+      } else if (event === 'change') {
+        // File changed - find new logs since last read
+        const newLogs = this.findNewLogs(existingLogs, logs);
+        if (newLogs.length > 0) {
+          const updatedLogs = [...existingLogs, ...newLogs].slice(-1000); // Keep latest 1000 logs
+          this.serviceLogsCache.set(serviceName, updatedLogs);
+          this.notifyListeners('logsUpdated', { 
+            service: serviceName, 
+            logs: newLogs, 
+            event: 'change',
+            allLogs: updatedLogs
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error handling log file change:', error);
+    }
+  }
+
+  // Extract service name from log file path
+  getServiceNameFromLogPath(filePath) {
+    const parts = filePath.split(path.sep);
+    const logsIndex = parts.findIndex(part => part === '.logs');
+    if (logsIndex > 0) {
+      return parts[logsIndex - 1];
+    }
+    return null;
+  }
+
+  // Read logs from specific file path
+  async readLogsFromPath(filePath, serviceName) {
+    try {
+      const logs = await readLogsFromFile(filePath);
+      return logs.map(log => ({ ...log, service: serviceName }));
+    } catch (error) {
+      console.error(`Failed to read logs from ${filePath}:`, error);
+      return [];
+    }
+  }
+
+  // Find new logs that weren't in the previous set
+  findNewLogs(existingLogs, newLogs) {
+    if (existingLogs.length === 0) return newLogs;
+    
+    const lastExistingTimestamp = existingLogs[existingLogs.length - 1]?.timestamp;
+    if (!lastExistingTimestamp) return newLogs;
+    
+    return newLogs.filter(log => log.timestamp > lastExistingTimestamp);
+  }
+
+  // Get current logs for a service (or all services)
+  getCurrentLogs(serviceName = null, options = {}) {
+    if (serviceName) {
+      const logs = this.serviceLogsCache.get(serviceName) || [];
+      return this.applyFilters(logs, options);
+    }
+    
+    // Return logs from all services
+    let allLogs = [];
+    for (const [service, logs] of this.serviceLogsCache) {
+      allLogs = allLogs.concat(logs);
+    }
+    
+    // Sort by timestamp
+    allLogs.sort((a, b) => a.timestamp - b.timestamp);
+    
+    return this.applyFilters(allLogs, options);
+  }
+
+  // Apply filters to logs
+  applyFilters(logs, options = {}) {
+    let filteredLogs = [...logs];
+    
+    // Apply level filter
+    if (options.level) {
+      const targetLevel = options.level.toLowerCase();
+      const targetPriority = LOG_LEVELS[targetLevel]?.priority || 0;
+      filteredLogs = filteredLogs.filter(log => 
+        (LOG_LEVELS[log.level]?.priority || 0) >= targetPriority
+      );
+    }
+    
+    // Apply text filter
+    if (options.filter) {
+      const safeFilter = _.escapeRegExp(options.filter);
+      const regex = new RegExp(safeFilter, 'i');
+      filteredLogs = filteredLogs.filter(log => 
+        regex.test(log.message) || regex.test(log.raw || '')
+      );
+    }
+    
+    // Apply since filter
+    if (options.since) {
+      const sinceDate = parseTimeFilter(options.since);
+      if (sinceDate) {
+        filteredLogs = filteredLogs.filter(log => log.timestamp >= sinceDate);
+      }
+    }
+    
+    // Apply tail limit
+    if (options.tail) {
+      const tailCount = parseInt(options.tail);
+      filteredLogs = filteredLogs.slice(-tailCount);
+    }
+    
+    return filteredLogs.map(log => ({
+      timestamp: log.timestamp.toISOString(),
+      level: log.level,
+      service: log.service,
+      message: log.message,
+      data: log.data
+    }));
+  }
+
+  // Add listener for log updates
+  addListener(callback) {
+    this.listeners.add(callback);
+    return () => this.listeners.delete(callback);
+  }
+
+  // Notify all listeners of log updates
+  notifyListeners(event, data) {
+    this.listeners.forEach(callback => {
+      try {
+        callback(event, data);
+      } catch (error) {
+        console.error('Error notifying log listener:', error);
+      }
+    });
+  }
 }

@@ -67,6 +67,7 @@ Use it to prototype architectures, onboard teams faster, or spin up reproducible
 - 📄 Single source of truth: `polyglot.json`
 - ✅ Safe guards: port collision checks, reserved name checks, graceful fallbacks
 - 📝 Friendly chalk-based CLI output with clear status symbols
+- 📡 Admin dashboard with real-time log streaming (chokidar file watching, no manual refresh needed)
 
 ## Quick Start
 Scaffold a workspace named `my-org` with multiple services:
