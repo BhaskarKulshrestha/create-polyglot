@@ -398,14 +398,13 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       wsConnection.onclose = function() {
         console.log('WebSocket disconnected');
         wsConnection = null;
-        isStreamingLogs = false;
-        updateStreamButton();
+        scheduleReconnect();
       };
       
       wsConnection.onerror = function(error) {
         console.error('WebSocket error:', error);
-        isStreamingLogs = false;
-        updateStreamButton();
+        // Attempt reconnect after error
+        scheduleReconnect();
       };
       
       return wsConnection;
@@ -534,6 +533,27 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
       };
+    }
+
+    // --- Reconnection logic ---
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_DELAY = 30000; // 30s cap
+    function scheduleReconnect() {
+      // Don't reconnect if page is unloading
+      if (document.visibilityState === 'unloading') return;
+      reconnectAttempts++;
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+      console.log('Scheduling WebSocket reconnect in', delay, 'ms');
+      setTimeout(() => {
+        initWebSocket();
+        // restart stream with current filter
+        const service = (currentLogsFilter.service || '');
+        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+          wsConnection.send(JSON.stringify({ type: 'start_log_stream', service: service || null }));
+        } else if (wsConnection) {
+          wsConnection.onopen = () => wsConnection.send(JSON.stringify({ type: 'start_log_stream', service: service || null }));
+        }
+      }, delay);
     }
   </script>
 </head>
