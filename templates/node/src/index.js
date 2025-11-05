@@ -1,6 +1,7 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import rateLimit from 'express-rate-limit';
 
 // Initialize logger
 let logger;
@@ -25,6 +26,13 @@ function log(level, message, data = {}) {
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Set up rate limiter for the /logs endpoint (max 5 requests per minute)
+const logsLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,
+  message: { error: 'Too many requests, please try again later.' }
+});
+
 // Middleware for request logging
 app.use((req, res, next) => {
   log('info', `${req.method} ${req.path}`, { 
@@ -41,7 +49,7 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'node' });
 });
 
-app.get('/logs', (req, res) => {
+app.get('/logs', logsLimiter, (req, res) => {
   try {
     const { tail = 50, level, since } = req.query;
     
