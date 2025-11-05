@@ -2,155 +2,70 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import http from 'http';
-import crypto from 'crypto';
 import { spawn } from 'node:child_process';
+import { WebSocketServer, WebSocket } from 'ws';
 import { getLogsForAPI, LogFileWatcher } from './logs.js';
  
-// Simple WebSocket implementation for real-time log streaming
-function handleWebSocketUpgrade(request, socket, head) {
-  const key = request.headers['sec-websocket-key'];
-  if (!key) {
-    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
-    return;
+// ws helper
+function sendWebSocketMessage(ws, message) {
+  // Use WebSocket.OPEN constant (instance does not expose OPEN reliably)
+  if (ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify(message));
+    } catch (e) {
+      // Silently ignore send failures; connection will be cleaned by heartbeat
+    }
   }
-  
-  const acceptKey = crypto
-    .createHash('sha1')
-    .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-    .digest('base64');
-  
-  const responseHeaders = [
-    'HTTP/1.1 101 Switching Protocols',
-    'Upgrade: websocket',
-    'Connection: Upgrade',
-    `Sec-WebSocket-Accept: ${acceptKey}`,
-    '\r\n'
-  ].join('\r\n');
-  
-  socket.write(responseHeaders);
-  
-  // Handle WebSocket frames (simplified - only handles text frames)
-  socket.on('data', (buffer) => {
-    // Simple frame parsing for text messages
-    if (buffer.length > 2) {
-      const opcode = buffer[0] & 0x0f;
-      if (opcode === 0x01) { // Text frame
-        let payloadLength = buffer[1] & 0x7f;
-        let maskStart = 2;
-        
-        if (payloadLength === 126) {
-          payloadLength = buffer.readUInt16BE(2);
-          maskStart = 4;
-        } else if (payloadLength === 127) {
-          payloadLength = buffer.readBigUInt64BE(2);
-          maskStart = 10;
-        }
-        
-        const mask = buffer.slice(maskStart, maskStart + 4);
-        const payload = buffer.slice(maskStart + 4, maskStart + 4 + Number(payloadLength));
-        
-        // Unmask payload
-        for (let i = 0; i < payload.length; i++) {
-          payload[i] ^= mask[i % 4];
-        }
-        
-        try {
-          const message = JSON.parse(payload.toString());
-          handleWebSocketMessage(socket, message);
-        } catch (e) {
-          console.error('Invalid WebSocket message:', e.message);
-        }
-      }
-    }
-  });
-  
-  socket.on('close', () => {
-    // Clean up any active log stream listeners for this socket
-    if (socket.logUnsubscribe) {
-      socket.logUnsubscribe();
-      socket.logUnsubscribe = null;
-    }
-  });
-}
-
-function sendWebSocketMessage(socket, message) {
-  const payload = JSON.stringify(message);
-  const payloadBuffer = Buffer.from(payload);
-  const frame = Buffer.alloc(2 + payloadBuffer.length);
-  
-  frame[0] = 0x81; // FIN + text frame
-  frame[1] = payloadBuffer.length;
-  payloadBuffer.copy(frame, 2);
-  
-  socket.write(frame);
 }
 
 // Global log watcher instance
 let globalLogWatcher = null;
+let wsServer = null;
 
-function handleWebSocketMessage(socket, message) {
+async function handleWebSocketMessage(ws, message) {
   if (message.type === 'start_log_stream') {
-    // Start streaming logs for specified service
-    const serviceName = message.service;
-    
-    // Send initial logs from watcher cache
-    if (globalLogWatcher) {
-      const logs = globalLogWatcher.getCurrentLogs(serviceName, { tail: 100 });
-      sendWebSocketMessage(socket, {
-        type: 'log_data',
-        service: serviceName,
-        logs: logs
-      });
-      
-      // Set up listener for real-time updates
-      setupLogStreamListener(socket, serviceName);
-    } else {
-      sendWebSocketMessage(socket, {
-        type: 'error',
-        message: 'Log watcher not initialized'
-      });
+    ws.serviceFilter = message.service || null;
+    if (!globalLogWatcher) {
+      sendWebSocketMessage(ws, { type: 'error', message: 'Log watcher not initialized' });
+      return;
     }
+    let logs = globalLogWatcher.getCurrentLogs(ws.serviceFilter, { tail: 100 });
+    // Fallback: if no logs found but service specified, attempt direct file read
+    if (logs.length === 0) {
+      try {
+        logs = await getLogsForAPI(ws.serviceFilter, { tail: 100 });
+      } catch (e) {
+        // ignore fallback failure
+      }
+    }
+    sendWebSocketMessage(ws, { type: 'log_data', service: ws.serviceFilter, logs });
   } else if (message.type === 'stop_log_stream') {
-    // Stop streaming logs
-    if (socket.logUnsubscribe) {
-      socket.logUnsubscribe();
-      socket.logUnsubscribe = null;
-    }
+    ws.serviceFilter = null;
   }
 }
 
 // Set up listener for real-time log updates
-function setupLogStreamListener(socket, serviceName) {
-  if (!globalLogWatcher) return;
-  
-  // Remove existing listener if any
-  if (socket.logUnsubscribe) {
-    socket.logUnsubscribe();
-  }
-  
-  // Add new listener
-  socket.logUnsubscribe = globalLogWatcher.addListener((event, data) => {
-    // Filter by service if specified
-    if (serviceName && data.service !== serviceName) return;
-    
+function broadcastLogEvent(event, payload) {
+  if (!wsServer) return;
+  wsServer.clients.forEach(ws => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    // Filter by service if client requested specific service
+    if (ws.serviceFilter && payload.service !== ws.serviceFilter) return;
     if (event === 'logsUpdated') {
-      sendWebSocketMessage(socket, {
+      sendWebSocketMessage(ws, {
         type: 'log_update',
-        service: data.service,
-        logs: data.logs.map(log => ({
+        service: payload.service,
+        logs: (payload.logs || []).map(log => ({
           timestamp: log.timestamp instanceof Date ? log.timestamp.toISOString() : log.timestamp,
           level: log.level,
           service: log.service,
           message: log.message,
           data: log.data
         })),
-        event: data.event
+        event: payload.event || 'change'
       });
     } else if (event === 'logsCleared') {
-      sendWebSocketMessage(socket, {
-        type: 'logs_cleared',
-        service: data.service
-      });
+      sendWebSocketMessage(ws, { type: 'logs_cleared', service: payload.service });
     }
   });
 }
@@ -751,12 +666,38 @@ export async function startAdminDashboard(options = {}) {
   });
   
   // Handle WebSocket upgrades
-  server.on('upgrade', (request, socket, head) => {
-    if (request.url === '/ws') {
-      handleWebSocketUpgrade(request, socket, head);
-    } else {
-      socket.end();
-    }
+  // Initialize ws server for /ws path
+  wsServer = new WebSocketServer({ server, path: '/ws' });
+  // Heartbeat to detect dead connections
+  const heartbeatInterval = setInterval(() => {
+    wsServer.clients.forEach(ws => {
+      if (ws.isAlive === false) {
+        try { ws.terminate(); } catch {}
+        return;
+      }
+      ws.isAlive = false;
+      try { ws.ping(); } catch {}
+    });
+  }, 30000);
+
+  wsServer.on('connection', (ws) => {
+    ws.serviceFilter = null; // default: all services
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        handleWebSocketMessage(ws, msg);
+      } catch (e) {
+        sendWebSocketMessage(ws, { type: 'error', message: 'Invalid JSON payload' });
+      }
+    });
+    // Auto-start stream for all logs if client hasn't sent a start message within short delay
+    setTimeout(() => {
+      if (!ws.serviceFilter && ws.readyState === WebSocket.OPEN) {
+        handleWebSocketMessage(ws, { type: 'start_log_stream' });
+      }
+    }, 250);
   });
   
   // Graceful shutdown
@@ -774,6 +715,16 @@ export async function startAdminDashboard(options = {}) {
         console.warn(chalk.yellow('⚠️  Error stopping log watcher:'), e.message);
       }
       globalLogWatcher = null;
+    }
+
+    if (wsServer) {
+      try {
+        wsServer.clients.forEach(c => c.close());
+        wsServer.close();
+      } catch (e) {
+        console.warn(chalk.yellow('⚠️  Error closing WebSocket server:'), e.message);
+      }
+      wsServer = null;
     }
 
     // Close HTTP server
@@ -806,5 +757,9 @@ export async function startAdminDashboard(options = {}) {
     console.log(chalk.gray(`[${timestamp}] Services: ${chalk.green(upCount + ' up')}, ${chalk.red(downCount + ' down')}, ${chalk.yellow(errorCount + ' error')}`));
   }, refreshInterval);
   
+  // Hook watcher events -> broadcast
+  if (globalLogWatcher) {
+    globalLogWatcher.addListener((event, data) => broadcastLogEvent(event, data));
+  }
   return server;
 }

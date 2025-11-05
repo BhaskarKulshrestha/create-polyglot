@@ -604,17 +604,15 @@ export class LogFileWatcher {
 
     // Determine watch paths for all services
     for (const service of cfg.services) {
-      // Check both services/ (new) and apps/ (legacy) directories
+      // Determine service directory (supports legacy apps/)
       let serviceDir = path.join(this.workspacePath, 'services', service.name);
       if (!fs.existsSync(serviceDir)) {
         serviceDir = path.join(this.workspacePath, 'apps', service.name);
       }
-      
       if (fs.existsSync(serviceDir)) {
-        const logsDir = getLogsDir(serviceDir);
-        if (fs.existsSync(logsDir)) {
-          watchPaths.push(path.join(logsDir, '*.log'));
-        }
+        // Ensure .logs directory exists so watcher can subscribe immediately
+        const logsDir = ensureLogsDir(serviceDir);
+        watchPaths.push(path.join(logsDir, '*.log'));
       }
     }
 
