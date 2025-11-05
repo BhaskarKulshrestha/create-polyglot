@@ -5,6 +5,7 @@ import path from 'path';
 import url from 'url';
 import { execa } from 'execa';
 import { renderServicesTable, printBoxMessage } from './ui.js';
+import { initializeServiceLogs } from './logs.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -326,6 +327,10 @@ export async function scaffoldMonorepo(projectNameArg, options) {
           await fs.writeFile(path.join(dest, 'README.md'), `# ${svcName} service\n\nScaffolded by create-polyglot.`);
         }
       }
+      
+      // Initialize logging for the service
+      initializeServiceLogs(dest);
+      
       console.log(chalk.green(`✅ Created ${svcName} (${svcType}) service on port ${svcPort}`));
     }
 
@@ -541,6 +546,10 @@ export async function addService(projectDir, { type, name, port }, options = {})
   } else {
     await fs.writeFile(path.join(dest, 'README.md'), `# ${name} (${type}) service\n`);
   }
+  
+  // Initialize logging for the service
+  initializeServiceLogs(dest);
+  
   console.log(chalk.green(`✅ Added service '${name}' (${type}) on port ${port}`));
   cfg.services.push({ name, type, port, path: `services/${name}` });
   await fs.writeJSON(configPath, cfg, { spaces: 2 });

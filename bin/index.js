@@ -9,6 +9,7 @@ import { renderServicesTable } from './lib/ui.js';
 import { runDev } from './lib/dev.js';
 import { startAdminDashboard } from './lib/admin.js';
 import { runHotReload } from './lib/hotreload.js';
+import { viewLogs } from './lib/logs.js';
  
 const program = new Command();
  
@@ -174,6 +175,27 @@ program
       await runHotReload({ servicesFilter: filter, dryRun: !!opts.dryRun });
     } catch (e) {
       console.error(chalk.red('Failed to start hot reload:'), e.message);
+      process.exit(1);
+    }
+  });
+
+// Service logs viewer and management
+program
+  .command('logs')
+  .description('View and manage service logs')
+  .argument('[service]', 'Specific service name (optional, shows all services if omitted)')
+  .option('-f, --follow', 'Follow log output in real-time')
+  .option('-t, --tail <lines>', 'Number of recent lines to show (default: 50)', '50')
+  .option('--since <time>', 'Show logs since timestamp (ISO format or relative like "1h", "30m")')
+  .option('--filter <pattern>', 'Filter logs by pattern (regex supported)')
+  .option('--level <level>', 'Filter by log level (error, warn, info, debug)')
+  .option('--export <format>', 'Export logs to file (json, csv, txt)')
+  .option('--clear', 'Clear all logs for the specified service(s)')
+  .action(async (serviceName, opts) => {
+    try {
+      await viewLogs(serviceName, opts);
+    } catch (e) {
+      console.error(chalk.red('Failed to view logs:'), e.message);
       process.exit(1);
     }
   });

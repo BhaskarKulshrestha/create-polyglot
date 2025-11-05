@@ -16,7 +16,8 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/' },
       { text: 'CLI', link: '/cli/' },
-      { text: 'Templates', link: '/templates/' }
+      { text: 'Templates', link: '/templates/' },
+      { text: 'Features', link: '/logs-feature' }
     ],
     sidebar: {
       '/guide/': [
@@ -24,7 +25,8 @@ export default defineConfig({
         { text: 'Getting Started', link: '/guide/getting-started' },
         { text: 'Presets', link: '/guide/presets' },
         { text: 'Docker & Compose', link: '/guide/docker' },
-        { text: 'Extending (New Service)', link: '/guide/extending-service' }
+        { text: 'Extending (New Service)', link: '/guide/extending-service' },
+        { text: 'Service Logs', link: '/logs-feature' }
       ],
       '/cli/': [
         { text: 'Usage', link: '/cli/' },
