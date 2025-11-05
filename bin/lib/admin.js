@@ -2,9 +2,109 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import http from 'http';
+import crypto from 'crypto';
 import { spawn } from 'node:child_process';
+import { getLogsForAPI } from './logs.js';
  
-// Simple service status checker
+// Simple WebSocket implementation for real-time log streaming
+function handleWebSocketUpgrade(request, socket, head) {
+  const key = request.headers['sec-websocket-key'];
+  if (!key) {
+    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+    return;
+  }
+  
+  const acceptKey = crypto
+    .createHash('sha1')
+    .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+    .digest('base64');
+  
+  const responseHeaders = [
+    'HTTP/1.1 101 Switching Protocols',
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Accept: ${acceptKey}`,
+    '\r\n'
+  ].join('\r\n');
+  
+  socket.write(responseHeaders);
+  
+  // Handle WebSocket frames (simplified - only handles text frames)
+  socket.on('data', (buffer) => {
+    // Simple frame parsing for text messages
+    if (buffer.length > 2) {
+      const opcode = buffer[0] & 0x0f;
+      if (opcode === 0x01) { // Text frame
+        let payloadLength = buffer[1] & 0x7f;
+        let maskStart = 2;
+        
+        if (payloadLength === 126) {
+          payloadLength = buffer.readUInt16BE(2);
+          maskStart = 4;
+        } else if (payloadLength === 127) {
+          payloadLength = buffer.readBigUInt64BE(2);
+          maskStart = 10;
+        }
+        
+        const mask = buffer.slice(maskStart, maskStart + 4);
+        const payload = buffer.slice(maskStart + 4, maskStart + 4 + Number(payloadLength));
+        
+        // Unmask payload
+        for (let i = 0; i < payload.length; i++) {
+          payload[i] ^= mask[i % 4];
+        }
+        
+        try {
+          const message = JSON.parse(payload.toString());
+          handleWebSocketMessage(socket, message);
+        } catch (e) {
+          console.error('Invalid WebSocket message:', e.message);
+        }
+      }
+    }
+  });
+  
+  socket.on('close', () => {
+    // Clean up any active log watchers for this socket
+    if (socket.logWatcher) {
+      socket.logWatcher.cleanup();
+    }
+  });
+}
+
+function sendWebSocketMessage(socket, message) {
+  const payload = JSON.stringify(message);
+  const payloadBuffer = Buffer.from(payload);
+  const frame = Buffer.alloc(2 + payloadBuffer.length);
+  
+  frame[0] = 0x81; // FIN + text frame
+  frame[1] = payloadBuffer.length;
+  payloadBuffer.copy(frame, 2);
+  
+  socket.write(frame);
+}
+
+function handleWebSocketMessage(socket, message) {
+  if (message.type === 'start_log_stream') {
+    // Start streaming logs for specified service
+    const serviceName = message.service;
+    // For now, just send initial logs - real streaming would require file watching
+    getLogsForAPI(serviceName, { tail: 50 })
+      .then(logs => {
+        sendWebSocketMessage(socket, {
+          type: 'log_data',
+          service: serviceName,
+          logs: logs
+        });
+      })
+      .catch(err => {
+        sendWebSocketMessage(socket, {
+          type: 'error',
+          message: 'Failed to fetch logs: ' + err.message
+        });
+      });
+  }
+}
 async function checkServiceStatus(service) {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
@@ -96,6 +196,27 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
     .path { font-family:monospace; font-size:.7rem; color:#334155; }
     .footer { margin-top:40px; font-size:.65rem; color:#64748b; text-align:center; }
     .empty { margin-top:80px; text-align:center; font-size:1rem; color:#475569; }
+    
+    /* Logs section styles */
+    .logs-section { margin-top:40px; }
+    .logs-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+    .logs-controls { display:flex; gap:8px; align-items:center; }
+    .logs-controls select, .logs-controls input { padding:4px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:.75rem; }
+    .logs-controls button { padding:4px 12px; background:#0369a1; color:#fff; border:none; border-radius:4px; font-size:.75rem; cursor:pointer; }
+    .logs-controls button:hover { background:#0284c7; }
+    .logs-controls button.secondary { background:#6b7280; }
+    .logs-controls button.secondary:hover { background:#4b5563; }
+    .logs-container { background:#1e293b; color:#e2e8f0; border-radius:6px; padding:16px; height:400px; overflow-y:auto; font-family:monospace; font-size:.75rem; line-height:1.4; }
+    .log-entry { margin-bottom:4px; padding:2px 0; }
+    .log-entry.error { color:#f87171; }
+    .log-entry.warn { color:#fbbf24; }
+    .log-entry.info { color:#60a5fa; }
+    .log-entry.debug { color:#9ca3af; }
+    .log-timestamp { color:#6b7280; }
+    .log-service { color:#a78bfa; font-weight:600; }
+    .log-level { font-weight:600; margin-right:8px; }
+    .logs-empty { text-align:center; color:#6b7280; padding:60px 20px; }
+    
     @media (max-width: 920px) { .layout { flex-direction:column; } .sidebar { width:100%; flex-direction:row; flex-wrap:wrap; } .service-list { display:flex; flex-wrap:wrap; gap:8px; } .service-list li { margin:0; } }
   </style>
   <script>
@@ -177,7 +298,224 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
     window.addEventListener('DOMContentLoaded', () => {
       scheduleCountdown();
       setTimeout(fetchStatus, REFRESH_MS); // initial schedule
+      initializeLogs();
     });
+    
+    // Logs functionality
+    let currentLogsFilter = {};
+    let logsAutoRefresh = false;
+    let logsRefreshInterval;
+    let wsConnection = null;
+    
+    function initializeLogs() {
+      const refreshBtn = document.querySelector('#logs-refresh');
+      const autoRefreshBtn = document.querySelector('#logs-auto-refresh');
+      const clearBtn = document.querySelector('#logs-clear');
+      const exportBtn = document.querySelector('#logs-export');
+      const streamBtn = document.querySelector('#logs-stream');
+      const serviceFilter = document.querySelector('#logs-service-filter');
+      const levelFilter = document.querySelector('#logs-level-filter');
+      const searchInput = document.querySelector('#logs-search');
+      
+      refreshBtn?.addEventListener('click', fetchLogs);
+      autoRefreshBtn?.addEventListener('click', toggleAutoRefresh);
+      streamBtn?.addEventListener('click', toggleLogStream);
+      clearBtn?.addEventListener('click', clearLogs);
+      exportBtn?.addEventListener('click', exportLogs);
+      serviceFilter?.addEventListener('change', updateLogsFilter);
+      levelFilter?.addEventListener('change', updateLogsFilter);
+      searchInput?.addEventListener('input', debounce(updateLogsFilter, 500));
+      
+      fetchLogs(); // Initial load
+    }
+    
+    function initWebSocket() {
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        return wsConnection;
+      }
+      
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = protocol + '//' + location.host + '/ws';
+      
+      wsConnection = new WebSocket(wsUrl);
+      
+      wsConnection.onopen = function() {
+        console.log('WebSocket connected');
+      };
+      
+      wsConnection.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          handleWebSocketMessage(data);
+        } catch (e) {
+          console.error('Failed to parse WebSocket message:', e);
+        }
+      };
+      
+      wsConnection.onclose = function() {
+        console.log('WebSocket disconnected');
+        wsConnection = null;
+      };
+      
+      wsConnection.onerror = function(error) {
+        console.error('WebSocket error:', error);
+      };
+      
+      return wsConnection;
+    }
+    
+    function handleWebSocketMessage(data) {
+      if (data.type === 'log_data') {
+        renderLogs(data.logs);
+      } else if (data.type === 'error') {
+        renderLogsError(data.message);
+      }
+    }
+    
+    function toggleLogStream() {
+      const btn = document.querySelector('#logs-stream');
+      if (!btn) return;
+      
+      if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) {
+        initWebSocket();
+        btn.textContent = 'Stop Stream';
+        btn.style.background = '#dc2626';
+        
+        // Start streaming for current service filter
+        const serviceFilter = document.querySelector('#logs-service-filter');
+        const service = serviceFilter?.value || null;
+        
+        wsConnection.onopen = function() {
+          wsConnection.send(JSON.stringify({
+            type: 'start_log_stream',
+            service: service
+          }));
+        };
+      } else {
+        wsConnection.close();
+        btn.textContent = 'Live Stream';
+        btn.style.background = '#0369a1';
+      }
+    }
+    
+    function updateLogsFilter() {
+      const serviceFilter = document.querySelector('#logs-service-filter');
+      const levelFilter = document.querySelector('#logs-level-filter');
+      const searchInput = document.querySelector('#logs-search');
+      
+      currentLogsFilter = {
+        service: serviceFilter?.value || '',
+        level: levelFilter?.value || '',
+        filter: searchInput?.value || ''
+      };
+      
+      fetchLogs();
+    }
+    
+    async function fetchLogs() {
+      try {
+        const params = new URLSearchParams();
+        params.set('tail', '100');
+        
+        if (currentLogsFilter.service) params.set('service', currentLogsFilter.service);
+        if (currentLogsFilter.level) params.set('level', currentLogsFilter.level);
+        if (currentLogsFilter.filter) params.set('filter', currentLogsFilter.filter);
+        
+        const res = await fetch('/api/logs?' + params.toString());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        
+        const logs = await res.json();
+        renderLogs(logs);
+      } catch (e) {
+        console.error('Failed to fetch logs:', e);
+        renderLogsError('Failed to fetch logs: ' + e.message);
+      }
+    }
+    
+    function renderLogs(logs) {
+      const container = document.querySelector('#logs-container');
+      if (!container) return;
+      
+      if (logs.length === 0) {
+        container.innerHTML = '<div class="logs-empty">No logs found matching the current filters.</div>';
+        return;
+      }
+      
+      const html = logs.map(log => {
+        const timestamp = new Date(log.timestamp).toLocaleTimeString();
+        const levelClass = log.level.toLowerCase();
+        return '<div class="log-entry ' + levelClass + '">' +
+               '<span class="log-timestamp">' + timestamp + '</span> ' +
+               '<span class="log-service">' + log.service.padEnd(10) + '</span> ' +
+               '<span class="log-level ' + levelClass + '">' + log.level.toUpperCase().padEnd(5) + '</span> ' +
+               '<span class="log-message">' + escapeHtml(log.message) + '</span>' +
+               '</div>';
+      }).join('');
+      
+      container.innerHTML = html;
+      container.scrollTop = container.scrollHeight; // Auto-scroll to bottom
+    }
+    
+    function renderLogsError(message) {
+      const container = document.querySelector('#logs-container');
+      if (container) {
+        container.innerHTML = '<div class="logs-empty" style="color:#f87171;">' + escapeHtml(message) + '</div>';
+      }
+    }
+    
+    function toggleAutoRefresh() {
+      const btn = document.querySelector('#logs-auto-refresh');
+      if (!btn) return;
+      
+      logsAutoRefresh = !logsAutoRefresh;
+      
+      if (logsAutoRefresh) {
+        btn.textContent = 'Stop Auto-Refresh';
+        btn.style.background = '#dc2626';
+        logsRefreshInterval = setInterval(fetchLogs, 3000);
+      } else {
+        btn.textContent = 'Auto-Refresh';
+        btn.style.background = '#0369a1';
+        clearInterval(logsRefreshInterval);
+      }
+    }
+    
+    function clearLogs() {
+      if (!confirm('Are you sure you want to clear all logs? This action cannot be undone.')) return;
+      
+      // Note: This would need a backend endpoint to actually clear logs
+      alert('Clear logs functionality would need to be implemented on the backend.');
+    }
+    
+    function exportLogs() {
+      // Create export URL with current filters
+      const params = new URLSearchParams();
+      params.set('tail', '1000'); // Export more logs
+      
+      if (currentLogsFilter.service) params.set('service', currentLogsFilter.service);
+      if (currentLogsFilter.level) params.set('level', currentLogsFilter.level);
+      if (currentLogsFilter.filter) params.set('filter', currentLogsFilter.filter);
+      
+      window.open('/api/logs?' + params.toString(), '_blank');
+    }
+    
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
   </script>
 </head>
 <body>
@@ -233,6 +571,36 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
             </tr>`).join('')}
         </tbody>
       </table>`}
+      
+      <!-- Logs Section -->
+      <div class="logs-section">
+        <div class="logs-header">
+          <h2 style="font-size:1rem; font-weight:600; color:#334155; margin:0;">Service Logs</h2>
+          <div class="logs-controls">
+            <select id="logs-service-filter">
+              <option value="">All Services</option>
+              ${servicesWithStatus.map(s => `<option value="${s.name}">${s.name}</option>`).join('')}
+            </select>
+            <select id="logs-level-filter">
+              <option value="">All Levels</option>
+              <option value="error">Error</option>
+              <option value="warn">Warning</option>
+              <option value="info">Info</option>
+              <option value="debug">Debug</option>
+            </select>
+            <input type="text" id="logs-search" placeholder="Search logs..." style="width:150px;">
+            <button id="logs-refresh">Refresh</button>
+            <button id="logs-auto-refresh" class="secondary">Auto-Refresh</button>
+            <button id="logs-stream" class="secondary">Live Stream</button>
+            <button id="logs-export" class="secondary">Export</button>
+            <button id="logs-clear" class="secondary">Clear</button>
+          </div>
+        </div>
+        <div id="logs-container" class="logs-container">
+          <div class="logs-empty">Loading logs...</div>
+        </div>
+      </div>
+      
       <div class="footer">Polyglot Admin · Generated by create-polyglot</div>
     </main>
   </div>
@@ -261,7 +629,9 @@ export async function startAdminDashboard(options = {}) {
   console.log(chalk.yellow('   Press Ctrl+C to stop\n'));
   
   const server = http.createServer(async (req, res) => {
-    if (req.url === '/api/status') {
+    const url = new URL(req.url, `http://localhost:${port}`);
+    
+    if (url.pathname === '/api/status') {
       // API endpoint for service status
       const servicesWithStatus = await getServicesStatus(cfg.services);
       res.writeHead(200, {
@@ -269,6 +639,37 @@ export async function startAdminDashboard(options = {}) {
         'Access-Control-Allow-Origin': '*'
       });
       res.end(JSON.stringify(servicesWithStatus, null, 2));
+      return;
+    }
+    
+    if (url.pathname === '/api/logs') {
+      // API endpoint for logs
+      try {
+        const serviceName = url.searchParams.get('service');
+        const tail = url.searchParams.get('tail') || '100';
+        const level = url.searchParams.get('level');
+        const since = url.searchParams.get('since');
+        const filter = url.searchParams.get('filter');
+        
+        const logs = await getLogsForAPI(serviceName, {
+          tail: parseInt(tail),
+          level,
+          since,
+          filter
+        });
+        
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify(logs, null, 2));
+      } catch (e) {
+        res.writeHead(500, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ error: e.message }));
+      }
       return;
     }
     
@@ -288,6 +689,15 @@ export async function startAdminDashboard(options = {}) {
       const openCmd = process.platform === 'darwin' ? 'open' :
                      process.platform === 'win32' ? 'start' : 'xdg-open';
       spawn(openCmd, [`http://localhost:${port}`], { detached: true, stdio: 'ignore' });
+    }
+  });
+  
+  // Handle WebSocket upgrades
+  server.on('upgrade', (request, socket, head) => {
+    if (request.url === '/ws') {
+      handleWebSocketUpgrade(request, socket, head);
+    } else {
+      socket.end();
     }
   });
   
