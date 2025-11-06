@@ -117,7 +117,8 @@ export async function getServicesStatus(services) {
     if (processStatus.status === 'running' && healthStatus.status === 'down') {
       combinedStatus.status = 'starting'; // Process running but not responding yet
     } else if (processStatus.status === 'stopped' && healthStatus.status === 'up') {
-      combinedStatus.status = 'external'; // Running externally (not managed by us)
+      combinedStatus.status = 'up'; // Running externally but show as up
+      combinedStatus.processStatus = 'external'; // Keep track that it's external
     }
     
     return combinedStatus;
@@ -223,63 +224,206 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
     var nextRefreshLabel;
     
     function startService(serviceName) {
+      // Show loading state
+      updateButtonState(serviceName, 'starting');
+      
       fetch('/api/services/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serviceName: serviceName })
       })
-      .then(function(response) { return response.json(); })
+      .then(function(response) { 
+        if (!response.ok) {
+          throw new Error('Network error: ' + response.status);
+        }
+        return response.json(); 
+      })
       .then(function(result) {
         if (result.error) {
-          alert('Failed to start ' + serviceName + ': ' + result.error);
+          showUserFriendlyError('start', serviceName, result.error);
         } else {
-          alert('Started ' + serviceName + ' successfully');
+          showUserFriendlySuccess('Started', serviceName);
           setTimeout(fetchStatus, 1000);
         }
       })
       .catch(function(error) {
-        alert('Error starting ' + serviceName + ': ' + error.message);
+        showUserFriendlyError('start', serviceName, error.message);
+      })
+      .finally(function() {
+        // Reset button state after operation
+        setTimeout(fetchStatus, 500);
       });
     }
 
     function stopService(serviceName) {
+      // Show loading state
+      updateButtonState(serviceName, 'stopping');
+      
       fetch('/api/services/stop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serviceName: serviceName })
       })
-      .then(function(response) { return response.json(); })
+      .then(function(response) { 
+        if (!response.ok) {
+          throw new Error('Network error: ' + response.status);
+        }
+        return response.json(); 
+      })
       .then(function(result) {
         if (result.error) {
-          alert('Failed to stop ' + serviceName + ': ' + result.error);
+          showUserFriendlyError('stop', serviceName, result.error);
         } else {
-          alert('Stopped ' + serviceName + ' successfully');
+          showUserFriendlySuccess('Stopped', serviceName);
           setTimeout(fetchStatus, 1000);
         }
       })
       .catch(function(error) {
-        alert('Error stopping ' + serviceName + ': ' + error.message);
+        showUserFriendlyError('stop', serviceName, error.message);
+      })
+      .finally(function() {
+        // Reset button state after operation
+        setTimeout(fetchStatus, 500);
       });
     }
 
     function restartService(serviceName) {
+      // Show loading state
+      updateButtonState(serviceName, 'restarting');
+      
       fetch('/api/services/restart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serviceName: serviceName })
       })
-      .then(function(response) { return response.json(); })
+      .then(function(response) { 
+        if (!response.ok) {
+          throw new Error('Network error: ' + response.status);
+        }
+        return response.json(); 
+      })
       .then(function(result) {
         if (result.error) {
-          alert('Failed to restart ' + serviceName + ': ' + result.error);
+          showUserFriendlyError('restart', serviceName, result.error);
         } else {
-          alert('Restarted ' + serviceName + ' successfully');
+          showUserFriendlySuccess('Restarted', serviceName);
           setTimeout(fetchStatus, 1000);
         }
       })
       .catch(function(error) {
-        alert('Error restarting ' + serviceName + ': ' + error.message);
+        showUserFriendlyError('restart', serviceName, error.message);
+      })
+      .finally(function() {
+        // Reset button state after operation
+        setTimeout(fetchStatus, 1000);
       });
+    }
+    
+    // Helper functions for better user feedback
+    function showUserFriendlyError(action, serviceName, errorMessage) {
+      let userMessage = '';
+      let suggestions = '';
+      
+      // Parse common error patterns and provide helpful messages
+      if (errorMessage.includes('already running')) {
+        userMessage = serviceName + ' is already running';
+        suggestions = 'Try refreshing the page or restart the service instead.';
+      } else if (errorMessage.includes('not running')) {
+        userMessage = serviceName + ' is not currently running';
+        suggestions = 'Try starting the service first.';
+      } else if (errorMessage.includes('Service directory not found')) {
+        userMessage = serviceName + ' directory not found';
+        suggestions = 'Check if the service exists in the services/ folder.';
+      } else if (errorMessage.includes('Unsupported service type')) {
+        userMessage = serviceName + ' has an unsupported service type';
+        suggestions = 'This service type cannot be managed through the dashboard.';
+      } else if (errorMessage.includes('Network error')) {
+        userMessage = 'Connection problem';
+        suggestions = 'Check if the admin dashboard is running properly and try again.';
+      } else if (errorMessage.includes('Port') && errorMessage.includes('in use')) {
+        userMessage = serviceName + ' cannot start - port is already in use';
+        suggestions = 'Another process might be using the same port. Check for conflicts.';
+      } else if (errorMessage.includes('permission') || errorMessage.includes('EACCES')) {
+        userMessage = 'Permission denied';
+        suggestions = 'Check file permissions or try running with appropriate privileges.';
+      } else if (errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
+        userMessage = 'Required files or commands not found';
+        suggestions = 'Make sure all dependencies are installed (npm install, python packages, etc).';
+      } else {
+        userMessage = 'Failed to ' + action + ' ' + serviceName;
+        suggestions = 'Check the service logs for more details.';
+      }
+      
+      showNotification('❌ ' + userMessage, suggestions, 'error');
+    }
+    
+    function showUserFriendlySuccess(action, serviceName) {
+      const messages = {
+        'Started': '✅ ' + serviceName + ' started successfully',
+        'Stopped': '🛑 ' + serviceName + ' stopped successfully', 
+        'Restarted': '🔄 ' + serviceName + ' restarted successfully'
+      };
+      showNotification(messages[action] || action + ' ' + serviceName, '', 'success');
+    }
+    
+    function updateButtonState(serviceName, state) {
+      const row = document.querySelector('#row-' + serviceName);
+      if (!row) return;
+      
+      const buttons = row.querySelectorAll('.service-controls button');
+      buttons.forEach(function(btn) {
+        if (state === 'starting' && btn.classList.contains('btn-start')) {
+          btn.disabled = true;
+          btn.textContent = 'Starting...';
+        } else if (state === 'stopping' && btn.classList.contains('btn-stop')) {
+          btn.disabled = true;
+          btn.textContent = 'Stopping...';
+        } else if (state === 'restarting' && btn.classList.contains('btn-restart')) {
+          btn.disabled = true;
+          btn.textContent = 'Restarting...';
+        }
+      });
+    }
+    
+    function showNotification(message, suggestion, type) {
+      // Remove any existing notifications
+      const existing = document.querySelector('#service-notification');
+      if (existing) existing.remove();
+      
+      // Create notification element
+      const notification = document.createElement('div');
+      notification.id = 'service-notification';
+      notification.style.cssText = 
+        'position: fixed; top: 20px; right: 20px; max-width: 400px; padding: 16px; ' +
+        'border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; ' +
+        'font-family: system-ui, -apple-system, sans-serif; line-height: 1.4;' +
+        (type === 'error' 
+          ? 'background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;' 
+          : 'background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d;');
+      
+      let content = '<div style="font-weight: 600; margin-bottom: 4px;">' + message + '</div>';
+      if (suggestion) {
+        content += '<div style="font-size: 0.9em; opacity: 0.8;">' + suggestion + '</div>';
+      }
+      notification.innerHTML = content;
+      
+      document.body.appendChild(notification);
+      
+      // Auto-hide after 5 seconds
+      setTimeout(function() {
+        if (notification.parentNode) {
+          notification.style.opacity = '0';
+          notification.style.transform = 'translateX(100%)';
+          setTimeout(function() { notification.remove(); }, 300);
+        }
+      }, 5000);
+      
+      // Add transition for smooth appearance
+      notification.style.transform = 'translateX(100%)';
+      notification.style.transition = 'all 0.3s ease';
+      setTimeout(function() {
+        notification.style.transform = 'translateX(0)';
+      }, 50);
     }
     
     function scheduleCountdown() {
@@ -320,7 +464,9 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       // Build rows HTML
       const rows = services.map(s => {
         const processInfo = s.processStatus && s.processStatus !== 'stopped' ? 
-          '<div style="font-size:0.6rem;color:#6b7280;margin-top:2px;">PID: ' + (s.pid || 'N/A') + ' | Uptime: ' + (s.uptime ? Math.floor(s.uptime / 60) + 'm' : '0m') + '</div>' : '';
+          '<div style="font-size:0.6rem;color:#6b7280;margin-top:2px;">' + 
+          (s.processStatus === 'external' ? 'External Process' : 'PID: ' + (s.pid || 'N/A') + ' | Uptime: ' + (s.uptime ? Math.floor(s.uptime / 60) + 'm' : '0m')) +
+          '</div>' : '';
         
         return '<tr id="row-'+s.name+'">'
         + '<td><strong>'+s.name+'</strong></td>'
@@ -329,9 +475,9 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
         + '<td><span class="status-badge '+s.status+'"><span class="dot '+s.status+'" style="box-shadow:none;width:8px;height:8px;"></span>'+s.status.toUpperCase()+'</span>' + processInfo + '</td>'
         + '<td><span class="path">'+(s.path || 'services/'+s.name)+'</span></td>'
         + '<td><div class="service-controls">'
-        + '<button class="btn-sm btn-start" data-service="'+s.name+'" '+(s.processStatus === 'running' ? 'disabled' : '')+'>Start</button>'
-        + '<button class="btn-sm btn-stop" data-service="'+s.name+'" '+(s.processStatus === 'stopped' ? 'disabled' : '')+'>Stop</button>'
-        + '<button class="btn-sm btn-restart" data-service="'+s.name+'">Restart</button>'
+        + '<button class="btn-sm btn-start" data-service="'+s.name+'" '+(s.processStatus === 'running' || s.processStatus === 'external' ? 'disabled' : '')+'>Start</button>'
+        + '<button class="btn-sm btn-stop" data-service="'+s.name+'" '+(s.processStatus === 'stopped' || s.processStatus === 'external' ? 'disabled' : '')+'>Stop</button>'
+        + '<button class="btn-sm btn-restart" data-service="'+s.name+'" '+(s.processStatus === 'external' ? 'disabled' : '')+'>Restart</button>'
         + '</div></td>'
         + '<td><a href="http://localhost:'+s.port+'" target="_blank">Open</a></td>'
         + '</tr>';
@@ -670,7 +816,7 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
                 </span>
                 ${s.processStatus && s.processStatus !== 'stopped' ? `
                   <div style="font-size:0.6rem;color:#6b7280;margin-top:2px;">
-                    PID: ${s.pid || 'N/A'} | Uptime: ${s.uptime ? Math.floor(s.uptime / 60) + 'm' : '0m'}
+                    ${s.processStatus === 'external' ? 'External Process' : `PID: ${s.pid || 'N/A'} | Uptime: ${s.uptime ? Math.floor(s.uptime / 60) + 'm' : '0m'}`}
                   </div>
                 ` : ''}
               </td>
@@ -678,14 +824,15 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
               <td>
                 <div class="service-controls">
                   <button class="btn-sm btn-start" data-service="${s.name}" 
-                          ${s.processStatus === 'running' ? 'disabled' : ''}>
+                          ${s.processStatus === 'running' || s.processStatus === 'external' ? 'disabled' : ''}>
                     Start
                   </button>
                   <button class="btn-sm btn-stop" data-service="${s.name}" 
-                          ${s.processStatus === 'stopped' ? 'disabled' : ''}>
+                          ${s.processStatus === 'stopped' || s.processStatus === 'external' ? 'disabled' : ''}>
                     Stop
                   </button>
-                  <button class="btn-sm btn-restart" data-service="${s.name}">
+                  <button class="btn-sm btn-restart" data-service="${s.name}"
+                          ${s.processStatus === 'external' ? 'disabled' : ''}>
                     Restart
                   </button>
                 </div>
