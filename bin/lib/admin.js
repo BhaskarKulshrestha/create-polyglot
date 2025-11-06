@@ -5,6 +5,7 @@ import http from 'http';
 import { spawn } from 'node:child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getLogsForAPI, LogFileWatcher } from './logs.js';
+import { startService, stopService, restartService, getServiceStatus, getAllServiceStatuses, validateServiceCanRun } from './service-manager.js';
  
 // ws helper
 function sendWebSocketMessage(ws, message) {
@@ -98,12 +99,28 @@ async function checkServiceStatus(service) {
 // Check status of all services
 export async function getServicesStatus(services) {
   const statusPromises = services.map(async (service) => {
-    const status = await checkServiceStatus(service);
-    return {
+    const healthStatus = await checkServiceStatus(service);
+    const processStatus = getServiceStatus(service.name);
+    
+    // Combine health check and process management status
+    const combinedStatus = {
       ...service,
-      ...status,
+      ...healthStatus,
+      processStatus: processStatus.status,
+      pid: processStatus.pid,
+      uptime: processStatus.uptime,
+      processStartTime: processStatus.startTime,
       lastChecked: new Date().toISOString()
     };
+    
+    // Override status if we know the process is managed locally
+    if (processStatus.status === 'running' && healthStatus.status === 'down') {
+      combinedStatus.status = 'starting'; // Process running but not responding yet
+    } else if (processStatus.status === 'stopped' && healthStatus.status === 'up') {
+      combinedStatus.status = 'external'; // Running externally (not managed by us)
+    }
+    
+    return combinedStatus;
   });
  
   return Promise.all(statusPromises);
@@ -182,11 +199,89 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
     .log-level { font-weight:600; margin-right:8px; }
     .logs-empty { text-align:center; color:#6b7280; padding:60px 20px; }
     
+    /* Service control buttons */
+    .service-controls { display:flex; gap:4px; flex-wrap:wrap; }
+    .btn-sm { padding:3px 8px; font-size:0.7rem; border:none; border-radius:3px; cursor:pointer; color:#fff; transition:opacity 0.2s; }
+    .btn-sm:disabled { opacity:0.5; cursor:not-allowed; }
+    .btn-start { background:#10b981; }
+    .btn-start:hover:not(:disabled) { background:#059669; }
+    .btn-stop { background:#ef4444; }
+    .btn-stop:hover:not(:disabled) { background:#dc2626; }
+    .btn-restart { background:#f59e0b; }
+    .btn-restart:hover:not(:disabled) { background:#d97706; }
+    
+    /* Additional status styles */
+    .status-badge.starting { background:#f59e0b; color:#fff; }
+    .status-badge.external { background:#8b5cf6; color:#fff; }
+    .dot.starting { background:#f59e0b; }
+    .dot.external { background:#8b5cf6; }
+    
     @media (max-width: 920px) { .layout { flex-direction:column; } .sidebar { width:100%; flex-direction:row; flex-wrap:wrap; } .service-list { display:flex; flex-wrap:wrap; gap:8px; } .service-list li { margin:0; } }
   </style>
   <script>
-    const REFRESH_MS = ${refreshInterval};
-    let nextRefreshLabel;
+    var REFRESH_MS = ${refreshInterval};
+    var nextRefreshLabel;
+    
+    function startService(serviceName) {
+      fetch('/api/services/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceName: serviceName })
+      })
+      .then(function(response) { return response.json(); })
+      .then(function(result) {
+        if (result.error) {
+          alert('Failed to start ' + serviceName + ': ' + result.error);
+        } else {
+          alert('Started ' + serviceName + ' successfully');
+          setTimeout(fetchStatus, 1000);
+        }
+      })
+      .catch(function(error) {
+        alert('Error starting ' + serviceName + ': ' + error.message);
+      });
+    }
+
+    function stopService(serviceName) {
+      fetch('/api/services/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceName: serviceName })
+      })
+      .then(function(response) { return response.json(); })
+      .then(function(result) {
+        if (result.error) {
+          alert('Failed to stop ' + serviceName + ': ' + result.error);
+        } else {
+          alert('Stopped ' + serviceName + ' successfully');
+          setTimeout(fetchStatus, 1000);
+        }
+      })
+      .catch(function(error) {
+        alert('Error stopping ' + serviceName + ': ' + error.message);
+      });
+    }
+
+    function restartService(serviceName) {
+      fetch('/api/services/restart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceName: serviceName })
+      })
+      .then(function(response) { return response.json(); })
+      .then(function(result) {
+        if (result.error) {
+          alert('Failed to restart ' + serviceName + ': ' + result.error);
+        } else {
+          alert('Restarted ' + serviceName + ' successfully');
+          setTimeout(fetchStatus, 1000);
+        }
+      })
+      .catch(function(error) {
+        alert('Error restarting ' + serviceName + ': ' + error.message);
+      });
+    }
+    
     function scheduleCountdown() {
       const el = document.querySelector('.refresh');
       if (!el) return;
@@ -223,17 +318,24 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       if (meta) meta.textContent = 'Auto-refresh: ' + (REFRESH_MS/1000).toFixed(1) + 's | Services: ' + services.length;
  
       // Build rows HTML
-      const rows = services.map(s => (
-        '<tr id="row-'+s.name+'">'
+      const rows = services.map(s => {
+        const processInfo = s.processStatus && s.processStatus !== 'stopped' ? 
+          '<div style="font-size:0.6rem;color:#6b7280;margin-top:2px;">PID: ' + (s.pid || 'N/A') + ' | Uptime: ' + (s.uptime ? Math.floor(s.uptime / 60) + 'm' : '0m') + '</div>' : '';
+        
+        return '<tr id="row-'+s.name+'">'
         + '<td><strong>'+s.name+'</strong></td>'
         + '<td>'+s.type+'</td>'
         + '<td>'+s.port+'</td>'
-        + '<td><span class="status-badge '+s.status+'"><span class="dot '+s.status+'" style="box-shadow:none;width:8px;height:8px;"></span>'+s.status.toUpperCase()+'</span></td>'
+        + '<td><span class="status-badge '+s.status+'"><span class="dot '+s.status+'" style="box-shadow:none;width:8px;height:8px;"></span>'+s.status.toUpperCase()+'</span>' + processInfo + '</td>'
         + '<td><span class="path">'+(s.path || 'services/'+s.name)+'</span></td>'
-        + '<td>'+new Date(s.lastChecked).toLocaleTimeString()+'</td>'
+        + '<td><div class="service-controls">'
+        + '<button class="btn-sm btn-start" data-service="'+s.name+'" '+(s.processStatus === 'running' ? 'disabled' : '')+'>Start</button>'
+        + '<button class="btn-sm btn-stop" data-service="'+s.name+'" '+(s.processStatus === 'stopped' ? 'disabled' : '')+'>Stop</button>'
+        + '<button class="btn-sm btn-restart" data-service="'+s.name+'">Restart</button>'
+        + '</div></td>'
         + '<td><a href="http://localhost:'+s.port+'" target="_blank">Open</a></td>'
-        + '</tr>'
-      )).join('');
+        + '</tr>';
+      }).join('');
       tbody.innerHTML = rows;
  
       // Update sidebar dots
@@ -264,6 +366,22 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       scheduleCountdown();
       setTimeout(fetchStatus, REFRESH_MS); // initial schedule
       initializeLogs();
+      
+      // Event delegation for service control buttons
+      document.addEventListener('click', function(event) {
+        var target = event.target;
+        var serviceName = target.getAttribute('data-service');
+        
+        if (!serviceName || target.disabled) return;
+        
+        if (target.classList.contains('btn-start')) {
+          startService(serviceName);
+        } else if (target.classList.contains('btn-stop')) {
+          stopService(serviceName);
+        } else if (target.classList.contains('btn-restart')) {
+          restartService(serviceName);
+        }
+      });
     });
     
     // Logs functionality (auto-stream)
@@ -470,6 +588,33 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
         }
       }, delay);
     }
+
+    function showServiceAction(message, type) {
+      // Create or update action message element
+      let actionMsg = document.querySelector('#service-action-msg');
+      if (!actionMsg) {
+        actionMsg = document.createElement('div');
+        actionMsg.id = 'service-action-msg';
+        actionMsg.style.cssText = 'position:fixed;top:70px;right:20px;padding:10px 15px;border-radius:4px;font-weight:500;z-index:1000;transition:opacity 0.3s;';
+        document.body.appendChild(actionMsg);
+      }
+      
+      // Set message and styling
+      actionMsg.textContent = message;
+      actionMsg.style.backgroundColor = type === 'success' ? '#10b981' : '#ef4444';
+      actionMsg.style.color = 'white';
+      actionMsg.style.opacity = '1';
+      
+      // Auto-hide after 3 seconds
+      setTimeout(() => {
+        actionMsg.style.opacity = '0';
+        setTimeout(() => {
+          if (actionMsg.parentNode) {
+            actionMsg.parentNode.removeChild(actionMsg);
+          }
+        }, 300);
+      }, 3000);
+    }
   </script>
 </head>
 <body>
@@ -508,7 +653,7 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
             <th>Port</th>
             <th>Status</th>
             <th>Path</th>
-            <th>Last Checked</th>
+            <th>Controls</th>
             <th>Link</th>
           </tr>
         </thead>
@@ -518,9 +663,33 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
               <td><strong>${s.name}</strong></td>
               <td>${s.type}</td>
               <td>${s.port}</td>
-              <td><span class="status-badge ${s.status}"><span class="dot ${s.status}" style="box-shadow:none;width:8px;height:8px;"></span>${s.status.toUpperCase()}</span></td>
+              <td>
+                <span class="status-badge ${s.status}">
+                  <span class="dot ${s.status}" style="box-shadow:none;width:8px;height:8px;"></span>
+                  ${s.status.toUpperCase()}
+                </span>
+                ${s.processStatus && s.processStatus !== 'stopped' ? `
+                  <div style="font-size:0.6rem;color:#6b7280;margin-top:2px;">
+                    PID: ${s.pid || 'N/A'} | Uptime: ${s.uptime ? Math.floor(s.uptime / 60) + 'm' : '0m'}
+                  </div>
+                ` : ''}
+              </td>
               <td><span class="path">${s.path || `services/${s.name}`}</span></td>
-              <td>${new Date(s.lastChecked).toLocaleTimeString()}</td>
+              <td>
+                <div class="service-controls">
+                  <button class="btn-sm btn-start" data-service="${s.name}" 
+                          ${s.processStatus === 'running' ? 'disabled' : ''}>
+                    Start
+                  </button>
+                  <button class="btn-sm btn-stop" data-service="${s.name}" 
+                          ${s.processStatus === 'stopped' ? 'disabled' : ''}>
+                    Stop
+                  </button>
+                  <button class="btn-sm btn-restart" data-service="${s.name}">
+                    Restart
+                  </button>
+                </div>
+              </td>
               <td><a href="http://localhost:${s.port}" target="_blank">Open</a></td>
             </tr>`).join('')}
         </tbody>
@@ -643,6 +812,100 @@ export async function startAdminDashboard(options = {}) {
         });
         res.end(JSON.stringify({ error: e.message }));
       }
+      return;
+    }
+    
+    // Service management endpoints
+    if (url.pathname === '/api/services/start' && req.method === 'POST') {
+      try {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+          const { serviceName } = JSON.parse(body);
+          const service = cfg.services.find(s => s.name === serviceName);
+          
+          if (!service) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Service not found' }));
+            return;
+          }
+          
+          try {
+            const result = await startService(service);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: error.message }));
+          }
+        });
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to parse request' }));
+      }
+      return;
+    }
+    
+    if (url.pathname === '/api/services/stop' && req.method === 'POST') {
+      try {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+          const { serviceName } = JSON.parse(body);
+          
+          try {
+            const result = await stopService(serviceName);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: error.message }));
+          }
+        });
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to parse request' }));
+      }
+      return;
+    }
+    
+    if (url.pathname === '/api/services/restart' && req.method === 'POST') {
+      try {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+          const { serviceName } = JSON.parse(body);
+          const service = cfg.services.find(s => s.name === serviceName);
+          
+          if (!service) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Service not found' }));
+            return;
+          }
+          
+          try {
+            const result = await restartService(service);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: error.message }));
+          }
+        });
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to parse request' }));
+      }
+      return;
+    }
+    
+    if (url.pathname === '/api/services/status') {
+      const statuses = getAllServiceStatuses();
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify(statuses, null, 2));
       return;
     }
     
