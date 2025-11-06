@@ -4,26 +4,17 @@ import chalk from 'chalk';
 import { spawn } from 'node:child_process';
 import http from 'http';
 import { initializeServiceLogs } from './logs.js';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const cliEntry = path.resolve(__dirname, '..', 'index.js');
 
 // Start admin dashboard
 function startAdminDashboard(cwd) {
   console.log(chalk.cyan('🎛️  Starting admin dashboard on http://localhost:9000'));
   
-  // Try to find create-polyglot command
-  let adminCmd = 'npx';
-  let adminArgs = ['create-polyglot', 'admin', '--port', '9000'];
-  
-  // Try global command first
-  try {
-    const { execSync } = require('child_process');
-    execSync('which create-polyglot', { stdio: 'ignore' });
-    adminCmd = 'create-polyglot';
-    adminArgs = ['admin', '--port', '9000'];
-  } catch (e) {
-    // Use npx as fallback
-  }
-  
-  const adminProcess = spawn(adminCmd, adminArgs, {
+  const adminProcess = spawn(process.execPath, [cliEntry, 'admin', '--port', '9000', '--no-open'], {
     cwd,
     env: process.env,
     stdio: 'pipe'

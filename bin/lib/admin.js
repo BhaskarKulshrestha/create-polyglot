@@ -659,9 +659,14 @@ export async function startAdminDashboard(options = {}) {
     
     // Auto-open browser if requested
     if (options.open !== false) {
-      const openCmd = process.platform === 'darwin' ? 'open' :
-                     process.platform === 'win32' ? 'start' : 'xdg-open';
-      spawn(openCmd, [`http://localhost:${port}`], { detached: true, stdio: 'ignore' });
+      const url = `http://localhost:${port}`;
+      if (process.platform === 'win32') {
+        // Use cmd start to open default browser on Windows; needs shell invocation
+        spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' });
+      } else {
+        const openCmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
+        spawn(openCmd, [url], { detached: true, stdio: 'ignore' });
+      }
     }
   });
   

@@ -612,7 +612,9 @@ export class LogFileWatcher {
       if (fs.existsSync(serviceDir)) {
         // Ensure .logs directory exists so watcher can subscribe immediately
         const logsDir = ensureLogsDir(serviceDir);
-        watchPaths.push(path.join(logsDir, '*.log'));
+        // Watch the directory itself, not glob pattern - more reliable
+        const watchPath = logsDir.replace(/\\/g, '/');
+        watchPaths.push(watchPath);
       }
     }
 
@@ -621,21 +623,35 @@ export class LogFileWatcher {
       return;
     }
 
+    console.log(chalk.cyan('[LogWatcher] Watch paths:'), watchPaths);
+
     // Initialize cache with current logs
     await this.loadInitialLogs(cfg.services);
 
-    // Start chokidar watcher
+    // Start chokidar watcher - watch directories, filter for .log files in handlers
     this.watcher = chokidar.watch(watchPaths, {
-      ignored: /(^|[\/\\])\../, // ignore dotfiles
+      ignored: ['**/node_modules/**', '**/.git/**', '**/.DS_Store'],
       persistent: true,
-      ignoreInitial: false
+      ignoreInitial: false,
+      usePolling: true, // Enable polling for more reliable file watching on Windows
+      interval: 1000,   // Poll every second
+      depth: 0          // Only watch files in the immediate directory, not subdirectories
     });
 
     this.watcher
-      .on('add', (filePath) => this.handleFileChange('add', filePath))
-      .on('change', (filePath) => this.handleFileChange('change', filePath))
-      .on('unlink', (filePath) => this.handleFileChange('unlink', filePath))
-      .on('error', (error) => console.error('Log watcher error:', error));
+      .on('add', (filePath) => {
+        if (!filePath.endsWith('.log')) return; // Only process .log files
+        this.handleFileChange('add', filePath);
+      })
+      .on('change', (filePath) => {
+        if (!filePath.endsWith('.log')) return; // Only process .log files
+        this.handleFileChange('change', filePath);
+      })
+      .on('unlink', (filePath) => {
+        if (!filePath.endsWith('.log')) return; // Only process .log files
+        this.handleFileChange('unlink', filePath);
+      })
+      .on('error', (error) => console.error(chalk.red('Log watcher error:'), error));
 
     this.isWatching = true;
     console.log(chalk.green('📁 Started watching log files with chokidar'));
@@ -678,7 +694,9 @@ export class LogFileWatcher {
   async handleFileChange(event, filePath) {
     try {
       const serviceName = this.getServiceNameFromLogPath(filePath);
-      if (!serviceName) return;
+      if (!serviceName) {
+        return;
+      }
 
       if (event === 'unlink') {
         // File deleted - clear cache for this service

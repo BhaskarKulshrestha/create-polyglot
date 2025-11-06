@@ -1,4 +1,4 @@
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -81,28 +81,60 @@ export class Logger {
 }
 
 // Start admin dashboard
+function resolveCliEntry() {
+  try {
+    return require.resolve('create-polyglot/bin/index.js', { paths: [root] });
+  } catch (e) {
+    // ignore resolution failure
+  }
+
+  const nodeModulesCli = path.join(root, 'node_modules', 'create-polyglot', 'bin', 'index.js');
+  if (fs.existsSync(nodeModulesCli)) {
+    return nodeModulesCli;
+  }
+
+  const repoCli = path.resolve(__dirname, '../bin/index.js');
+  if (fs.existsSync(repoCli)) {
+    return repoCli;
+  }
+
+  return null;
+}
+
 function startAdminDashboard() {
   console.log('🎛️  Starting admin dashboard...');
   
-  // Try to find create-polyglot globally or in node_modules
-  let adminCmd = 'npx';
-  let adminArgs = ['create-polyglot', 'admin', '--port', '9000'];
-  
-  // Fallback: check if create-polyglot is available globally
-  try {
-    const { execSync } = require('child_process');
-    execSync('which create-polyglot', { stdio: 'ignore' });
-    adminCmd = 'create-polyglot';
-    adminArgs = ['admin', '--port', '9000'];
-  } catch (e) {
-    // Use npx as fallback
-  }
-  
-  const adminProcess = spawn(adminCmd, adminArgs, {
+  const spawnOptions = {
     cwd: root,
     env: process.env,
-    stdio: 'pipe'
-  });
+    stdio: 'pipe',
+    shell: process.platform === 'win32'
+  };
+
+  const localCli = resolveCliEntry();
+  let adminCmd;
+  let adminArgs;
+
+  if (localCli) {
+    adminCmd = process.execPath;
+    adminArgs = [localCli, 'admin', '--port', '9000', '--no-open'];
+    spawnOptions.shell = false;
+  } else {
+    const check = spawnSync('create-polyglot', ['--version'], {
+      stdio: 'ignore',
+      shell: spawnOptions.shell
+    });
+
+    if (check.status === 0 && !check.error) {
+      adminCmd = 'create-polyglot';
+      adminArgs = ['admin', '--port', '9000', '--no-open'];
+    } else {
+      adminCmd = 'npx';
+      adminArgs = ['create-polyglot', 'admin', '--port', '9000', '--no-open'];
+    }
+  }
+
+  const adminProcess = spawn(adminCmd, adminArgs, spawnOptions);
   
   adminProcess.stdout.on('data', d => process.stdout.write(`[admin] ${d}`));
   adminProcess.stderr.on('data', d => process.stderr.write(`[admin] ${d}`));
