@@ -212,13 +212,13 @@ my-org/
   package.json
   turbo.json / nx.json (if preset chosen)
   scripts/
-    dev-basic.cjs
+    npx create-polyglot dev
 ```
 
 ### Presets
 - **Turborepo**: Generates `turbo.json`, sets root `dev` & `build` scripts for pipeline caching.
 - **Nx**: Generates `nx.json` and adjusts scripts accordingly.
-- **Basic**: Minimal setup + `scripts/dev-basic.cjs` for simple concurrency.
+- **Basic**: Minimal setup + `npx create-polyglot dev` for simple concurrency.
 
 ## Development Workflow
 1. Scaffold with `init`.
@@ -228,7 +228,7 @@ my-org/
 5. Extend infra / databases inside `compose.yaml`.
 
 ### Basic Dev Runner
-When no preset is chosen, `npm run dev` uses `scripts/dev-basic.cjs`:
+When no preset is chosen, `npm run dev` uses `npx create-polyglot dev`:
 1. Detects package manager (pnpm > yarn > bun > npm fallback)
 2. Scans `services/` for Node services
 3. Runs those with a `dev` script
@@ -402,16 +402,16 @@ my-org/
   package.json
   turbo.json / nx.json (if preset chosen)
   scripts/
-    dev-basic.cjs
+    npx create-polyglot dev
 ```
 
 ### Presets
 - Turborepo: Generates `turbo.json`, sets root `dev` & `build` scripts to leverage Turborepo pipelines.
 - Nx: Generates `nx.json` and adjusts scripts accordingly.
-- Basic: Provides a minimal setup plus `scripts/dev-basic.cjs` for simple concurrency.
+- Basic: Provides a minimal setup plus `npx create-polyglot dev` for simple concurrency.
 
 ### Basic Dev Runner
-When no preset is chosen, `npm run dev` uses `scripts/dev-basic.cjs`:
+When no preset is chosen, `npm run dev` uses `npx create-polyglot dev`:
 1. Detects package manager (pnpm > yarn > bun > npm fallback)
 2. Scans `services/` for Node services
 3. Runs those with a `dev` script

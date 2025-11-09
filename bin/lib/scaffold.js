@@ -29,9 +29,9 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       interactiveQuestions.push({
         type: 'select',
         name: 'preset',
-        message: 'Preset (optional):',
+        message: 'Preset:',
         choices: [
-          { title: 'None', value: '' },
+          { title: 'None (basic)', value: '' },
           { title: 'Turborepo', value: 'turborepo' },
           { title: 'Nx', value: 'nx' }
         ],
@@ -310,7 +310,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
           ], { cwd: dest, stdio: 'inherit' });
           usedGenerator = true;
         } catch (e) {
-          console.log(chalk.yellow('⚠️  create-next-app failed, falling back to internal template. Error:'), e.shortMessage || e.message);
+          console.log(chalk.yellow(`⚠️  create-next-app failed: ${e.message}. Using template.`));
         }
       }
       if (!usedGenerator) {
@@ -327,10 +327,10 @@ export async function scaffoldMonorepo(projectNameArg, options) {
           await fs.writeFile(path.join(dest, 'README.md'), `# ${svcName} service\n\nScaffolded by create-polyglot.`);
         }
       }
-      
+
       // Initialize logging for the service
       initializeServiceLogs(dest);
-      
+
       console.log(chalk.green(`✅ Created ${svcName} (${svcType}) service on port ${svcPort}`));
     }
 
@@ -341,7 +341,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       version: '0.1.0',
       workspaces: ['services/*', 'packages/*'],
       scripts: {
-        dev: 'node scripts/dev-basic.cjs',
+        dev: 'npx create-polyglot dev',
         'list:services': 'node scripts/list-services.mjs',
         format: 'prettier --write .',
         lint: 'eslint "services/**/*.{js,jsx,ts,tsx}" --max-warnings 0 || true'
@@ -366,16 +366,6 @@ export async function scaffoldMonorepo(projectNameArg, options) {
     // Always ensure scripts dir exists (needed for list-services script)
     const scriptsDir = path.join(projectDir, 'scripts');
     await fs.mkdirp(scriptsDir);
-    if (!options.preset) {
-      const runnerSrc = path.join(__dirname, '../../scripts/dev-basic.cjs');
-      try {
-        if (await fs.pathExists(runnerSrc)) {
-          await fs.copy(runnerSrc, path.join(scriptsDir, 'dev-basic.cjs'));
-        }
-      } catch (e) {
-        console.log(chalk.yellow('⚠️  Failed to copy dev-basic runner:', e.message));
-      }
-    }
     // Create list-services script with runtime status detection
     const listScriptPath = path.join(scriptsDir, 'list-services.mjs');
     await fs.writeFile(listScriptPath, `#!/usr/bin/env node\nimport fs from 'fs';\nimport path from 'path';\nimport net from 'net';\nimport chalk from 'chalk';\nconst cwd = process.cwd();\nconst cfgPath = path.join(cwd, 'polyglot.json');\nif(!fs.existsSync(cfgPath)){ console.error(chalk.red('polyglot.json not found.')); process.exit(1);}\nconst cfg = JSON.parse(fs.readFileSync(cfgPath,'utf-8'));\n\nfunction strip(str){return str.replace(/\\x1B\\[[0-9;]*m/g,'');}\nfunction pad(str,w){const raw=strip(str);return str+' '.repeat(Math.max(0,w-raw.length));}\nfunction table(items){ if(!items.length){console.log(chalk.yellow('No services.'));return;} const cols=[{k:'name',h:'Name'},{k:'type',h:'Type'},{k:'port',h:'Port'},{k:'status',h:'Status'},{k:'path',h:'Path'}]; const widths=cols.map(c=>Math.max(c.h.length,...items.map(i=>strip(i[c.k]).length))+2); const top='┌'+widths.map(w=>'─'.repeat(w)).join('┬')+'┐'; const sep='├'+widths.map(w=>'─'.repeat(w)).join('┼')+'┤'; const bot='└'+widths.map(w=>'─'.repeat(w)).join('┴')+'┘'; console.log(top); console.log('│'+cols.map((c,i)=>pad(chalk.bold.white(c.h),widths[i])).join('│')+'│'); console.log(sep); for(const it of items){ console.log('│'+cols.map((c,i)=>pad(it[c.k],widths[i])).join('│')+'│'); } console.log(bot); console.log(chalk.gray('Total: '+items.length)); }\n\nasync function check(port){ return new Promise(res=>{ const sock=net.createConnection({port,host:'127.0.0.1'},()=>{sock.destroy();res(true);}); sock.setTimeout(350,()=>{sock.destroy();res(false);}); sock.on('error',()=>{res(false);});}); }\nconst promises = cfg.services.map(async s=>{ const up = await check(s.port); return { ...s, _up: up }; });\nconst results = await Promise.all(promises);\nconst rows = results.map(s=>({ name: chalk.cyan(s.name), type: colorType(s.type)(s.type), port: chalk.green(String(s.port)), status: s._up ? chalk.bgGreen.black(' UP ') : chalk.bgRed.white(' DOWN '), path: chalk.dim(s.path) }));\nfunction colorType(t){ switch(t){case 'node': return chalk.green; case 'python': return chalk.yellow; case 'go': return chalk.cyan; case 'java': return chalk.red; case 'frontend': return chalk.blue; default: return chalk.white;} }\nif(process.argv.includes('--json')) { console.log(JSON.stringify(results.map(r=>({name:r.name,type:r.type,port:r.port,up:r._up,path:r.path})),null,2)); } else { console.log(chalk.magentaBright('\nWorkspace Services (runtime status)')); table(rows); }\n`);
@@ -456,7 +446,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
         await execa('git', ['commit', '-m', 'chore: initial scaffold'], { cwd: projectDir });
         console.log(chalk.green('✅ Initialized git repository'));
       } catch (e) {
-        console.log(chalk.yellow('⚠️  Git initialization failed (continuing).'));
+        console.log(chalk.yellow('⚠️  Failed to initialize git repository:', e.message));
       }
     }
 
@@ -468,7 +458,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       try {
         await execa(pm, installCmd, { cwd: projectDir, stdio: 'inherit' });
       } catch (e) {
-        console.log(chalk.yellow('⚠️  Installing dependencies failed, you can try manually.'));
+        console.log(chalk.yellow('⚠️  Failed to install dependencies:', e.message));
       }
     }
 
@@ -487,7 +477,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
           console.log(chalk.green('✅ Added GitHub Actions workflow (.github/workflows/ci.yml)'));
         }
       } catch (e) {
-        console.log(chalk.yellow('⚠️  Failed to create GitHub Actions workflow:'), e.message);
+        console.log(chalk.yellow('⚠️  Failed to create GitHub Actions workflow:', e.message));
       }
     }
 
@@ -546,10 +536,10 @@ export async function addService(projectDir, { type, name, port }, options = {})
   } else {
     await fs.writeFile(path.join(dest, 'README.md'), `# ${name} (${type}) service\n`);
   }
-  
+
   // Initialize logging for the service
   initializeServiceLogs(dest);
-  
+
   console.log(chalk.green(`✅ Added service '${name}' (${type}) on port ${port}`));
   cfg.services.push({ name, type, port, path: `services/${name}` });
   await fs.writeJSON(configPath, cfg, { spaces: 2 });
