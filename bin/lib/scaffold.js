@@ -316,6 +316,17 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       if (!usedGenerator) {
         if (await fs.pathExists(src) && (await fs.readdir(src)).length > 0) {
           await fs.copy(src, dest, { overwrite: true });
+          
+          // Dynamically update the name field in package.json for Node.js services
+          if (svcType === 'node') {
+            const packageJsonPath = path.join(dest, 'package.json');
+            if (await fs.pathExists(packageJsonPath)) {
+              const packageJson = await fs.readJSON(packageJsonPath);
+              packageJson.name = `@${projectNameArg || 'polyglot'}/${svcName}`; // Ensure unique name
+              await fs.writeJSON(packageJsonPath, packageJson, { spaces: 2 });
+            }
+          }
+          
           if (templateFolder === 'spring-boot') {
             const propTxt = path.join(dest, 'src/main/resources/application.properties.txt');
             const prop = path.join(dest, 'src/main/resources/application.properties');
@@ -528,6 +539,17 @@ export async function addService(projectDir, { type, name, port }, options = {})
   const src = path.join(__dirname, `../../templates/${templateFolder}`);
   if (await fs.pathExists(src)) {
     await fs.copy(src, dest, { overwrite: true });
+    
+    // Dynamically update the name field in package.json for Node.js services
+    if (type === 'node') {
+      const packageJsonPath = path.join(dest, 'package.json');
+      if (await fs.pathExists(packageJsonPath)) {
+        const packageJson = await fs.readJSON(packageJsonPath);
+        packageJson.name = `@${cfg.name || 'polyglot'}/${name}`; // Ensure unique name
+        await fs.writeJSON(packageJsonPath, packageJson, { spaces: 2 });
+      }
+    }
+    
     if (templateFolder === 'spring-boot') {
       const propTxt = path.join(dest, 'src/main/resources/application.properties.txt');
       const prop = path.join(dest, 'src/main/resources/application.properties');
