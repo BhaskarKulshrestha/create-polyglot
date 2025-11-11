@@ -127,13 +127,27 @@ process.on('unhandledRejection', (reason, promise) => {
 
     // Test starting the service
     let startResponse = await makeServiceRequest('start', 'POST', { serviceName: 'test-api' });
+    console.log('Start response status:', startResponse.status);
+    console.log('Start response ok:', startResponse.ok);
+    
+    if (!startResponse.ok) {
+      const errorText = await startResponse.text();
+      console.log('Start error response:', errorText);
+    }
+    
     expect(startResponse.ok).toBe(true);
     let startResult = await startResponse.json();
+    console.log('Start result:', startResult);
     expect(startResult.success).toBe(true);
     expect(startResult.message).toContain('starting');
 
     // Wait for service to start
     await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Check service status before stopping
+    let statusCheckResponse = await makeServiceRequest('status');
+    const statusText = await statusCheckResponse.text();
+    console.log('Status check response:', statusText);
 
     // Verify service is running by checking health endpoint
     try {
@@ -143,6 +157,7 @@ process.on('unhandledRejection', (reason, promise) => {
       if (healthResponse.ok) {
         const healthData = await healthResponse.json();
         expect(healthData.status).toBe('ok');
+        console.log('Health check successful:', healthData);
       }
     } catch (error) {
       // Service might not be fully started yet, that's okay for this test
@@ -151,28 +166,30 @@ process.on('unhandledRejection', (reason, promise) => {
 
     // Test stopping the service (handle case where service might have exited)
     let stopResponse = await makeServiceRequest('stop', 'POST', { serviceName: 'test-api' });
+    console.log('Stop response status:', stopResponse.status);
+    console.log('Stop response ok:', stopResponse.ok);
     
     if (!stopResponse.ok) {
-      // Check if it's the "not running" error which can happen in test isolation
-      const errorBody = await stopResponse.text();
-      const errorData = JSON.parse(errorBody);
+      const errorText = await stopResponse.text();
+      console.log('Stop error response:', errorText);
       
-      if (errorData.error?.includes('not running')) {
-        // Service was not running - this can happen in test isolation, skip stop test
-        console.log('Service exited before stop test - this is expected in some test environments');
+      // If the stop fails because service isn't running, that's actually expected
+      // in a test environment where services might exit immediately
+      if (errorText.includes('Service test-api is not running')) {
+        console.log('Service already stopped (expected in test environment)');
+        // This is okay - the service likely exited immediately which is normal in tests
       } else {
-        // It's a different error, fail the test
+        // Re-throw if it's a different error
         expect(stopResponse.ok).toBe(true);
       }
     } else {
-      // Stop succeeded, verify the response
       let stopResult = await stopResponse.json();
       expect(stopResult.success).toBe(true);
       expect(stopResult.message).toContain('stopped');
-      
-      // Wait for stop to complete
-      await new Promise(resolve => setTimeout(resolve, 1000));
     }
+
+    // Wait for stop to complete
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Test restarting the service
     let restartResponse = await makeServiceRequest('restart', 'POST', { serviceName: 'test-api' });

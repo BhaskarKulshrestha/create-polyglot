@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getLogsForAPI, LogFileWatcher } from './logs.js';
 import { startService, stopService, restartService, getServiceStatus, getAllServiceStatuses, validateServiceCanRun } from './service-manager.js';
+import { initializePlugins, callHook } from './plugin-system.js';
  
 // ws helper
 function sendWebSocketMessage(ws, message) {
@@ -886,6 +887,15 @@ export async function startAdminDashboard(options = {}) {
     process.exit(1);
   }
   
+  // Initialize plugins
+  await initializePlugins(cwd);
+  
+  // Call before:admin:start hook
+  await callHook('before:admin:start', {
+    projectDir: cwd,
+    options
+  });
+  
   const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
   const port = options.port || 8080;
   const refreshInterval = options.refresh || 5000;
@@ -1064,8 +1074,17 @@ export async function startAdminDashboard(options = {}) {
     res.end(html);
   });
   
-  server.listen(port, () => {
+  server.listen(port, async () => {
     console.log(chalk.green(`✅ Admin Dashboard running at http://localhost:${port}`));
+    
+    // Call after:admin:start hook
+    await callHook('after:admin:start', {
+      projectDir: cwd,
+      port,
+      dashboardUrl: `http://localhost:${port}`,
+      options,
+      services: cfg.services
+    });
     
     // Auto-open browser if requested
     if (options.open !== false) {

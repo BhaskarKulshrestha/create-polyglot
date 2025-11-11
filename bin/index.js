@@ -199,6 +199,255 @@ program
       process.exit(1);
     }
   });
+
+// Plugin management commands
+const pluginCmd = program
+  .command('plugin')
+  .description('Manage plugins');
+
+pluginCmd
+  .command('list')
+  .description('List all plugins in the current workspace')
+  .option('--json', 'Output as JSON')
+  .option('--enabled-only', 'Show only enabled plugins')
+  .action(async (opts) => {
+    try {
+      const { pluginSystem } = await import('./lib/plugin-system.js');
+      const cwd = process.cwd();
+      
+      await pluginSystem.initialize(cwd);
+      const plugins = pluginSystem.getAllPlugins();
+      
+      let filteredPlugins = plugins;
+      if (opts.enabledOnly) {
+        filteredPlugins = plugins.filter(p => p.enabled);
+      }
+      
+      if (opts.json) {
+        console.log(JSON.stringify(filteredPlugins, null, 2));
+      } else {
+        if (filteredPlugins.length === 0) {
+          console.log(chalk.yellow('No plugins found.'));
+          return;
+        }
+        
+        console.log(chalk.blue(`\n📦 Found ${filteredPlugins.length} plugin(s):\n`));
+        for (const plugin of filteredPlugins) {
+          const status = plugin.enabled ? chalk.green('enabled') : chalk.red('disabled');
+          const type = plugin.type === 'local' ? chalk.cyan('local') : chalk.magenta('external');
+          console.log(`  ${chalk.bold(plugin.name)} [${status}] (${type})`);
+          if (plugin.plugin?.description) {
+            console.log(`    ${chalk.gray(plugin.plugin.description)}`);
+          }
+          if (plugin.plugin?.version) {
+            console.log(`    ${chalk.gray('v' + plugin.plugin.version)}`);
+          }
+          console.log();
+        }
+      }
+    } catch (e) {
+      console.error(chalk.red('Failed to list plugins:'), e.message);
+      process.exit(1);
+    }
+  });
+
+pluginCmd
+  .command('enable')
+  .description('Enable a plugin')
+  .argument('<name>', 'Plugin name')
+  .action(async (name) => {
+    try {
+      const { pluginSystem } = await import('./lib/plugin-system.js');
+      const cwd = process.cwd();
+      
+      await pluginSystem.initialize(cwd);
+      await pluginSystem.enablePlugin(name);
+      
+      console.log(chalk.green(`✅ Plugin '${name}' enabled successfully`));
+    } catch (e) {
+      console.error(chalk.red('Failed to enable plugin:'), e.message);
+      process.exit(1);
+    }
+  });
+
+pluginCmd
+  .command('disable')
+  .description('Disable a plugin')
+  .argument('<name>', 'Plugin name')
+  .action(async (name) => {
+    try {
+      const { pluginSystem } = await import('./lib/plugin-system.js');
+      const cwd = process.cwd();
+      
+      await pluginSystem.initialize(cwd);
+      await pluginSystem.disablePlugin(name);
+      
+      console.log(chalk.green(`✅ Plugin '${name}' disabled successfully`));
+    } catch (e) {
+      console.error(chalk.red('Failed to disable plugin:'), e.message);
+      process.exit(1);
+    }
+  });
+
+pluginCmd
+  .command('info')
+  .description('Show detailed information about a plugin')
+  .argument('<name>', 'Plugin name')
+  .option('--json', 'Output as JSON')
+  .action(async (name, opts) => {
+    try {
+      const { pluginSystem, HOOK_POINTS } = await import('./lib/plugin-system.js');
+      const cwd = process.cwd();
+      
+      await pluginSystem.initialize(cwd);
+      const plugin = pluginSystem.getPlugin(name);
+      
+      if (!plugin) {
+        console.log(chalk.yellow(`Plugin '${name}' not found.`));
+        process.exit(1);
+      }
+      
+      if (opts.json) {
+        const info = {
+          name: plugin.name,
+          type: plugin.type,
+          enabled: plugin.enabled,
+          loadedAt: plugin.loadedAt,
+          plugin: plugin.plugin,
+          config: plugin.config
+        };
+        console.log(JSON.stringify(info, null, 2));
+      } else {
+        console.log(chalk.blue(`\n📦 Plugin: ${chalk.bold(plugin.name)}\n`));
+        console.log(`Type: ${plugin.type === 'local' ? chalk.cyan('Local') : chalk.magenta('External')}`);
+        console.log(`Status: ${plugin.enabled ? chalk.green('Enabled') : chalk.red('Disabled')}`);
+        console.log(`Loaded: ${plugin.loadedAt ? new Date(plugin.loadedAt).toLocaleString() : 'Not loaded'}`);
+        
+        if (plugin.plugin) {
+          if (plugin.plugin.version) {
+            console.log(`Version: ${plugin.plugin.version}`);
+          }
+          if (plugin.plugin.description) {
+            console.log(`Description: ${plugin.plugin.description}`);
+          }
+          
+          if (plugin.plugin.hooks) {
+            console.log(`\nHooks (${Object.keys(plugin.plugin.hooks).length}):`);
+            for (const [hookName, handler] of Object.entries(plugin.plugin.hooks)) {
+              const description = HOOK_POINTS[hookName] || 'Custom hook';
+              console.log(`  ${chalk.cyan(hookName)} - ${chalk.gray(description)}`);
+            }
+          }
+          
+          if (plugin.plugin.methods) {
+            console.log(`\nMethods (${Object.keys(plugin.plugin.methods).length}):`);
+            for (const methodName of Object.keys(plugin.plugin.methods)) {
+              console.log(`  ${chalk.cyan(methodName)}`);
+            }
+          }
+        }
+        
+        if (plugin.config) {
+          console.log(`\nConfiguration:`);
+          console.log(JSON.stringify(plugin.config, null, 2));
+        }
+        console.log();
+      }
+    } catch (e) {
+      console.error(chalk.red('Failed to get plugin info:'), e.message);
+      process.exit(1);
+    }
+  });
+
+pluginCmd
+  .command('configure')
+  .description('Configure a plugin')
+  .argument('<name>', 'Plugin name')
+  .option('--config <json>', 'Configuration as JSON string')
+  .option('--priority <number>', 'Plugin loading priority (higher = loads first)')
+  .option('--external <path>', 'Set external plugin path or npm package')
+  .action(async (name, opts) => {
+    try {
+      const { pluginSystem } = await import('./lib/plugin-system.js');
+      const cwd = process.cwd();
+      
+      await pluginSystem.initialize(cwd);
+      
+      const config = {};
+      
+      if (opts.config) {
+        try {
+          Object.assign(config, JSON.parse(opts.config));
+        } catch (e) {
+          console.error(chalk.red('Invalid JSON in --config option'));
+          process.exit(1);
+        }
+      }
+      
+      if (opts.priority !== undefined) {
+        config.priority = parseInt(opts.priority);
+      }
+      
+      if (opts.external) {
+        config.external = opts.external;
+      }
+      
+      if (Object.keys(config).length === 0) {
+        console.log(chalk.yellow('No configuration options provided. Use --config, --priority, or --external.'));
+        process.exit(1);
+      }
+      
+      await pluginSystem.configurePlugin(name, config);
+      
+      console.log(chalk.green(`✅ Plugin '${name}' configured successfully`));
+      console.log('New configuration:', JSON.stringify(config, null, 2));
+    } catch (e) {
+      console.error(chalk.red('Failed to configure plugin:'), e.message);
+      process.exit(1);
+    }
+  });
+
+pluginCmd
+  .command('stats')
+  .description('Show plugin system statistics')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    try {
+      const { pluginSystem } = await import('./lib/plugin-system.js');
+      const cwd = process.cwd();
+      
+      await pluginSystem.initialize(cwd);
+      const stats = pluginSystem.getStats();
+      
+      if (opts.json) {
+        console.log(JSON.stringify(stats, null, 2));
+      } else {
+        console.log(chalk.blue('\n📊 Plugin System Statistics\n'));
+        console.log(`Initialized: ${stats.initialized ? chalk.green('Yes') : chalk.red('No')}`);
+        console.log(`Project Directory: ${stats.projectDir || 'N/A'}`);
+        console.log(`Total Plugins: ${stats.totalPlugins}`);
+        console.log(`Enabled Plugins: ${stats.enabledPlugins}`);
+        console.log(`Available Hook Points: ${stats.hookPoints}`);
+        
+        console.log('\nRegistered Hooks:');
+        for (const [hookName, count] of Object.entries(stats.registeredHooks)) {
+          console.log(`  ${chalk.cyan(hookName)}: ${count} handler(s)`);
+        }
+        
+        if (Object.keys(stats.config).length > 0) {
+          console.log('\nPlugin Configuration:');
+          for (const [pluginName, config] of Object.entries(stats.config)) {
+            console.log(`  ${chalk.bold(pluginName)}:`);
+            console.log(`    ${JSON.stringify(config, null, 4).replace(/^/gm, '    ')}`);
+          }
+        }
+        console.log();
+      }
+    } catch (e) {
+      console.error(chalk.red('Failed to get plugin stats:'), e.message);
+      process.exit(1);
+    }
+  });
  
 program.parse();
  

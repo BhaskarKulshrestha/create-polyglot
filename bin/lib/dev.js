@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import { spawn } from 'node:child_process';
 import http from 'http';
 import { initializeServiceLogs } from './logs.js';
+import { initializePlugins, callHook } from './plugin-system.js';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -70,6 +71,17 @@ export async function runDev({ docker=false } = {}) {
     console.error(chalk.red('polyglot.json not found. Run inside a generated workspace.'));
     process.exit(1);
   }
+  
+  // Initialize plugins
+  await initializePlugins(cwd);
+  
+  // Call before:dev:start hook
+  await callHook('before:dev:start', {
+    projectDir: cwd,
+    docker,
+    mode: docker ? 'docker' : 'local'
+  });
+
   const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
   const servicesDir = path.join(cwd, 'services');
   if (!fs.existsSync(servicesDir)) {
@@ -164,9 +176,31 @@ const args = ['run', useScript];
   }
   await Promise.all(healthPromises);
 
+  // Call after:dev:start hook
+  await callHook('after:dev:start', {
+    projectDir: cwd,
+    docker,
+    mode: docker ? 'docker' : 'local',
+    processes: procs.length,
+    services: procs.map(p => p.serviceName).filter(Boolean)
+  });
+
   if (procs.length > 0) {
     console.log(chalk.blue('Watching services. Press Ctrl+C to exit.'));
-    process.on('SIGINT', () => { procs.forEach(p => p.kill('SIGINT')); process.exit(0); });
+    process.on('SIGINT', async () => { 
+      await callHook('before:dev:stop', {
+        projectDir: cwd,
+        docker,
+        mode: docker ? 'docker' : 'local'
+      });
+      procs.forEach(p => p.kill('SIGINT')); 
+      await callHook('after:dev:stop', {
+        projectDir: cwd,
+        docker,
+        mode: docker ? 'docker' : 'local'
+      });
+      process.exit(0); 
+    });
   }
 }
 
