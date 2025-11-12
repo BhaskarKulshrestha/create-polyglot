@@ -6,12 +6,19 @@ import url from 'url';
 import { execa } from 'execa';
 import { renderServicesTable, printBoxMessage } from './ui.js';
 import { initializeServiceLogs } from './logs.js';
+import { initializePlugins, callHook } from './plugin-system.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
 // Extracted core scaffold logic so future subcommands (e.g. add service, plugins) can reuse pieces.
 export async function scaffoldMonorepo(projectNameArg, options) {
   try {
+    // Call before:init hook
+    await callHook('before:init', { 
+      projectName: projectNameArg, 
+      options: { ...options } 
+    });
+
     // Collect interactive data if arguments / flags not provided
     let projectName = projectNameArg;
     const interactiveQuestions = [];
@@ -275,7 +282,17 @@ export async function scaffoldMonorepo(projectNameArg, options) {
     }
     fs.mkdirSync(projectDir, { recursive: true });
 
-  console.log(chalk.yellow('\n📁 Setting up monorepo structure...'));
+    // Initialize plugin system for the new project
+    await initializePlugins(projectDir);
+
+    // Call template copy hooks
+    await callHook('before:template:copy', {
+      projectName,
+      projectDir,
+      services
+    });
+
+    console.log(chalk.yellow('\n📁 Setting up monorepo structure...'));
   // New structure: services/, gateway/, infra/
   const servicesDir = path.join(projectDir, 'services');
   const gatewayDir = path.join(projectDir, 'gateway');
@@ -344,6 +361,14 @@ export async function scaffoldMonorepo(projectNameArg, options) {
 
       console.log(chalk.green(`✅ Created ${svcName} (${svcType}) service on port ${svcPort}`));
     }
+
+    // Call template copy complete hook
+    await callHook('after:template:copy', {
+      projectName,
+      projectDir,
+      services,
+      generatedServices: services.map(s => ({ ...s, path: path.join(servicesDir, s.name) }))
+    });
 
     const rootPkgPath = path.join(projectDir, 'package.json');
     const rootPkg = {
@@ -464,12 +489,36 @@ export async function scaffoldMonorepo(projectNameArg, options) {
     const pm = options.packageManager || 'npm';
     // Commander maps --no-install to options.install = false
     if (options.install !== false) {
+      await callHook('before:dependencies:install', {
+        projectName,
+        projectDir,
+        packageManager: pm,
+        services
+      });
+
       console.log(chalk.cyan(`\n📦 Installing root dependencies using ${pm}...`));
       const installCmd = pm === 'yarn' ? ['install'] : pm === 'pnpm' ? ['install'] : pm === 'bun' ? ['install'] : ['install'];
       try {
         await execa(pm, installCmd, { cwd: projectDir, stdio: 'inherit' });
+        
+        await callHook('after:dependencies:install', {
+          projectName,
+          projectDir,
+          packageManager: pm,
+          success: true,
+          services
+        });
       } catch (e) {
         console.log(chalk.yellow('⚠️  Failed to install dependencies:', e.message));
+        
+        await callHook('after:dependencies:install', {
+          projectName,
+          projectDir,
+          packageManager: pm,
+          success: false,
+          error: e.message,
+          services
+        });
       }
     }
 
@@ -497,9 +546,19 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       name: projectName,
       preset: options.preset || 'none',
       packageManager: options.packageManager,
-      services: services.map(s => ({ name: s.name, type: s.type, port: s.port, path: `services/${s.name}` }))
+      services: services.map(s => ({ name: s.name, type: s.type, port: s.port, path: `services/${s.name}` })),
+      plugins: {}
     };
     await fs.writeJSON(path.join(projectDir, 'polyglot.json'), polyglotConfig, { spaces: 2 });
+
+    // Call after:init hook
+    await callHook('after:init', {
+      projectName,
+      projectDir,
+      services,
+      config: polyglotConfig,
+      options
+    });
 
     printBoxMessage([
       '🎉 Monorepo setup complete!',
@@ -524,6 +583,17 @@ export async function addService(projectDir, { type, name, port }, options = {})
   if (!(await fs.pathExists(configPath))) {
     throw new Error('polyglot.json not found. Are you in a create-polyglot project?');
   }
+
+  // Initialize plugins for this project if not already done
+  await initializePlugins(projectDir);
+
+  // Call before:service:add hook
+  await callHook('before:service:add', {
+    projectDir,
+    service: { type, name, port },
+    options
+  });
+
   const cfg = await fs.readJSON(configPath);
   if (cfg.services.find(s => s.name === name)) {
     throw new Error(`Service '${name}' already exists.`);
@@ -562,9 +632,18 @@ export async function addService(projectDir, { type, name, port }, options = {})
   // Initialize logging for the service
   initializeServiceLogs(dest);
 
-  console.log(chalk.green(`✅ Added service '${name}' (${type}) on port ${port}`));
   cfg.services.push({ name, type, port, path: `services/${name}` });
   await fs.writeJSON(configPath, cfg, { spaces: 2 });
+
+  // Call after:service:add hook
+  await callHook('after:service:add', {
+    projectDir,
+    service: { type, name, port, path: `services/${name}` },
+    config: cfg,
+    options
+  });
+
+  console.log(chalk.green(`✅ Added service '${name}' (${type}) on port ${port}`));
 
   // Update compose.yaml (append or create)
   const composePath = path.join(projectDir, 'compose.yaml');
@@ -606,7 +685,331 @@ export async function scaffoldPlugin(projectDir, pluginName) {
   const pluginDir = path.join(pluginsDir, pluginName);
   if (await fs.pathExists(pluginDir)) throw new Error(`Plugin '${pluginName}' already exists.`);
   await fs.mkdirp(pluginDir);
-  await fs.writeFile(path.join(pluginDir, 'index.js'), `// Example plugin '${pluginName}'\nexport default {\n  name: '${pluginName}',\n  hooks: {\n    afterInit(ctx){\n      // ctx: { projectDir, config }\n      console.log('[plugin:${pluginName}] afterInit hook');\n    }\n  }\n};\n`);
-  await fs.writeFile(path.join(pluginDir, 'README.md'), `# Plugin ${pluginName}\n\nScaffolded plugin. Implement hooks in index.js.\n`);
-  console.log(chalk.green(`✅ Created plugin scaffold '${pluginName}'`));
+  
+  const pluginCode = `// Example plugin '${pluginName}'
+// This plugin demonstrates the available hooks and how to use them
+export default {
+  name: '${pluginName}',
+  version: '1.0.0',
+  description: 'Generated plugin for ${pluginName}',
+  
+  // Plugin initialization (optional)
+  // Called when the plugin is loaded
+  init(context) {
+    this.context = context;
+    console.log(\`[plugin:\${this.name}] Loaded successfully\`);
+  },
+
+  // Plugin configuration (optional)
+  config: {
+    // Plugin-specific configuration options
+    enabled: true,
+    logLevel: 'info'
+  },
+
+  // Hook handlers
+  hooks: {
+    // Project initialization hooks
+    'before:init': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Project initialization starting for: \${ctx.projectName}\`);
+      // You can modify the context or perform pre-initialization tasks
+    },
+
+    'after:init': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Project '\${ctx.projectName}' initialized successfully\`);
+      console.log(\`[plugin:\${this.name}] Services created: \${ctx.services.map(s => s.name).join(', ')}\`);
+      
+      // Example: Create custom files or modify the project structure
+      // await this.createCustomFiles(ctx.projectDir);
+    },
+
+    // Template handling hooks
+    'before:template:copy': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Copying templates for \${ctx.services.length} services\`);
+      // You can modify templates before they are copied
+    },
+
+    'after:template:copy': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Templates copied successfully\`);
+      // You can post-process generated files
+    },
+
+    // Service management hooks
+    'before:service:add': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Adding service: \${ctx.service.name} (\${ctx.service.type})\`);
+      // Validate service configuration or modify it
+      if (ctx.service.type === 'node' && !ctx.service.port) {
+        console.log(\`[plugin:\${this.name}] Setting default port for Node service\`);
+        ctx.service.port = 3001;
+      }
+    },
+
+    'after:service:add': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Service '\${ctx.service.name}' added successfully\`);
+      // Post-process the new service
+    },
+
+    // Development workflow hooks
+    'before:dev:start': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Starting development mode (docker: \${ctx.docker})\`);
+      // Pre-development setup
+    },
+
+    'after:dev:start': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Development mode started with \${ctx.processes} processes\`);
+      // Post-development setup, monitoring, etc.
+    },
+
+    'before:dev:stop': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Stopping development mode\`);
+      // Cleanup before stopping
+    },
+
+    'after:dev:stop': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Development mode stopped\`);
+      // Final cleanup
+    },
+
+    // Admin dashboard hooks
+    'before:admin:start': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Starting admin dashboard\`);
+      // Pre-admin setup
+    },
+
+    'after:admin:start': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Admin dashboard started at \${ctx.dashboardUrl}\`);
+      // Post-admin setup, register custom endpoints, etc.
+    },
+
+    // Dependency installation hooks
+    'before:dependencies:install': function(ctx) {
+      console.log(\`[plugin:\${this.name}] Installing dependencies with \${ctx.packageManager}\`);
+      // Modify package.json or add custom dependencies
+    },
+
+    'after:dependencies:install': function(ctx) {
+      if (ctx.success) {
+        console.log(\`[plugin:\${this.name}] Dependencies installed successfully\`);
+      } else {
+        console.log(\`[plugin:\${this.name}] Dependencies installation failed: \${ctx.error}\`);
+      }
+      // Post-installation tasks
+    }
+  },
+
+  // Plugin methods (optional)
+  // These can be called by other plugins or the system
+  methods: {
+    createCustomFiles: async function(projectDir) {
+      const fs = await import('fs-extra');
+      const path = await import('path');
+      
+      // Example: Create a custom configuration file
+      const configPath = path.join(projectDir, \`.config/\${this.name}.json\`);
+      await fs.mkdirp(path.dirname(configPath));
+      await fs.writeJSON(configPath, {
+        plugin: this.name,
+        version: this.version,
+        createdAt: new Date().toISOString(),
+        settings: this.config
+      }, { spaces: 2 });
+      
+      console.log(\`[plugin:\${this.name}] Created custom config at \${configPath}\`);
+    },
+
+    validateProject: function(projectDir) {
+      // Example validation logic
+      console.log(\`[plugin:\${this.name}] Validating project at \${projectDir}\`);
+      return true;
+    },
+
+    getPluginInfo: function() {
+      return {
+        name: this.name,
+        version: this.version,
+        description: this.description,
+        hooks: Object.keys(this.hooks),
+        methods: Object.keys(this.methods)
+      };
+    }
+  },
+
+  // Plugin lifecycle (optional)
+  onLoad: function() {
+    console.log(\`[plugin:\${this.name}] Plugin loaded\`);
+  },
+
+  onUnload: function() {
+    console.log(\`[plugin:\${this.name}] Plugin unloaded\`);
+  }
+};
+`;
+
+  await fs.writeFile(path.join(pluginDir, 'index.js'), pluginCode);
+  
+  const readmeContent = `# Plugin ${pluginName}
+
+Generated plugin for create-polyglot projects.
+
+## Features
+
+This plugin provides hooks for various lifecycle events in the create-polyglot workflow:
+
+### Available Hooks
+
+- **Project Initialization**
+  - \`before:init\` - Called before project scaffolding begins
+  - \`after:init\` - Called after project scaffolding completes
+
+- **Template Management**
+  - \`before:template:copy\` - Called before copying service templates
+  - \`after:template:copy\` - Called after copying service templates
+
+- **Service Management**
+  - \`before:service:add\` - Called before adding a new service
+  - \`after:service:add\` - Called after adding a new service
+
+- **Development Workflow**
+  - \`before:dev:start\` - Called before starting dev server(s)
+  - \`after:dev:start\` - Called after dev server(s) have started
+  - \`before:dev:stop\` - Called before stopping dev server(s)
+  - \`after:dev:stop\` - Called after dev server(s) have stopped
+
+- **Admin Dashboard**
+  - \`before:admin:start\` - Called before starting admin dashboard
+  - \`after:admin:start\` - Called after admin dashboard is running
+
+- **Dependencies**
+  - \`before:dependencies:install\` - Called before installing dependencies
+  - \`after:dependencies:install\` - Called after installing dependencies
+
+## Configuration
+
+Plugin configuration is stored in \`polyglot.json\`:
+
+\`\`\`json
+{
+  "plugins": {
+    "${pluginName}": {
+      "enabled": true,
+      "priority": 0,
+      "config": {
+        "logLevel": "info"
+      }
+    }
+  }
+}
+\`\`\`
+
+## Usage
+
+### Enable/Disable Plugin
+
+\`\`\`bash
+# Enable plugin
+create-polyglot plugin enable ${pluginName}
+
+# Disable plugin
+create-polyglot plugin disable ${pluginName}
+\`\`\`
+
+### Plugin Configuration
+
+\`\`\`bash
+# Configure plugin
+create-polyglot plugin configure ${pluginName} --config '{"logLevel": "debug"}'
+\`\`\`
+
+## Development
+
+1. Edit \`index.js\` to implement your hook handlers
+2. Add any additional methods to the \`methods\` object
+3. Update configuration options in the \`config\` object
+4. Test your plugin by running create-polyglot commands
+
+## Hook Context
+
+Each hook receives a context object with relevant information:
+
+\`\`\`javascript
+{
+  projectName,    // Name of the project
+  projectDir,     // Absolute path to project directory
+  services,       // Array of service configurations
+  config,         // Project configuration from polyglot.json
+  timestamp,      // Hook execution timestamp
+  hookName,       // Name of the current hook
+  // ... additional context depending on the hook
+}
+\`\`\`
+
+## Best Practices
+
+1. **Error Handling**: Always wrap async operations in try-catch blocks
+2. **Logging**: Use consistent logging with the plugin name prefix
+3. **Configuration**: Make your plugin configurable through the config object
+4. **Documentation**: Document any new hooks or methods you add
+5. **Testing**: Test your plugin with different project configurations
+
+## Examples
+
+### Custom File Generation
+
+\`\`\`javascript
+'after:init': async function(ctx) {
+  const fs = await import('fs-extra');
+  const path = await import('path');
+  
+  // Create a custom README section
+  const readmePath = path.join(ctx.projectDir, 'README.md');
+  const customSection = \`\\n## Custom Plugin Features\\n\\nAdded by \${this.name} plugin.\\n\`;
+  
+  if (await fs.pathExists(readmePath)) {
+    const content = await fs.readFile(readmePath, 'utf-8');
+    await fs.writeFile(readmePath, content + customSection);
+  }
+}
+\`\`\`
+
+### Service Validation
+
+\`\`\`javascript
+'before:service:add': function(ctx) {
+  if (ctx.service.type === 'custom') {
+    // Validate custom service configuration
+    if (!ctx.service.customConfig) {
+      throw new Error('Custom service requires customConfig');
+    }
+  }
+}
+\`\`\`
+
+### Development Environment Setup
+
+\`\`\`javascript
+'before:dev:start': async function(ctx) {
+  // Set up environment variables
+  process.env.PLUGIN_MODE = 'development';
+  process.env.PLUGIN_DEBUG = this.config.logLevel === 'debug';
+}
+\`\`\`
+`;
+
+  await fs.writeFile(path.join(pluginDir, 'README.md'), readmeContent);
+  
+  // Create a package.json for the plugin
+  const packageJson = {
+    name: `create-polyglot-plugin-${pluginName}`,
+    version: "1.0.0",
+    description: `Generated plugin ${pluginName} for create-polyglot`,
+    main: "index.js",
+    type: "module",
+    keywords: ["create-polyglot", "plugin", pluginName],
+    author: "",
+    license: "MIT"
+  };
+  
+  await fs.writeJSON(path.join(pluginDir, 'package.json'), packageJson, { spaces: 2 });
+  
+  console.log(chalk.green(`✅ Created plugin scaffold '${pluginName}' with comprehensive examples`));
 }
