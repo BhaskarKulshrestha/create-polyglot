@@ -219,7 +219,7 @@ Potential improvements for this feature:
 
 ## Related Documentation
 
-- [Service Logs Feature](./service-logs-feature.md) - Log viewing and streaming
+- [Service Logs Feature](./logs-feature.md) - Log viewing and streaming
 - [Admin Command](./cli/admin.md) - Admin dashboard usage
 - [Getting Started Guide](./guide/getting-started.md) - Basic create-polyglot usage
 
