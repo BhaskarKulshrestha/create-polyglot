@@ -17,6 +17,7 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/' },
       { text: 'CLI', link: '/cli/' },
       { text: 'Templates', link: '/templates/' },
+      { text: 'Configuration', link: '/configuration/polyglot-json' },
       { text: 'Features', link: '/logs-feature' }
     ],
     sidebar: {
@@ -26,11 +27,17 @@ export default defineConfig({
         { text: 'Presets', link: '/guide/presets' },
         { text: 'Docker & Compose', link: '/guide/docker' },
         { text: 'Extending (New Service)', link: '/guide/extending-service' },
-        { text: 'Service Logs', link: '/logs-feature' }
+        { text: 'Service Logs', link: '/logs-feature' },
+        { text: 'Plugin System', link: '/plugin-system' },
+        { text: 'Service Controls', link: '/service-controls-feature' }
       ],
       '/cli/': [
         { text: 'Usage', link: '/cli/' },
+        { text: 'Admin Dashboard', link: '/cli/admin' },
         { text: 'Flags', link: '/cli/flags' }
+      ],
+      '/configuration/': [
+        { text: 'polyglot.json', link: '/configuration/polyglot-json' }
       ],
       '/templates/': [
         { text: 'Overview', link: '/templates/' },
