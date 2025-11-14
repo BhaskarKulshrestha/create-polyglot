@@ -142,6 +142,7 @@ jobs:
           NOTES="${NOTES//\{internal\}/$INTERNAL}"
           NOTES="${NOTES//\{dependencies\}/$DEPENDENCIES}"
           NOTES="${NOTES//\{other\}/$OTHER}"
+          NOTES="${NOTES//\{refactoring\}/No refactoring changes in this release.}"
           NOTES="${NOTES//\{compare_url\}/https://github.com/${{ github.repository }}/compare/${{ steps.release_info.outputs.previous_tag }}...${{ steps.release_info.outputs.tag_name }}}"
           NOTES="${NOTES//\{contributors\}/${{ steps.contributors.outputs.contributors }}}"
           NOTES="${NOTES//\{commits\}/[View all commits](https://github.com/${{ github.repository }}/compare/${{ steps.release_info.outputs.previous_tag }}...${{ steps.release_info.outputs.tag_name }})}"
