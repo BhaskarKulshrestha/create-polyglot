@@ -466,6 +466,22 @@ Pass `--git` to automatically run `git init`, create an initial commit, and (if 
 ### Lint & Format
 Generates ESLint + Prettier base configs at the root. Extend rules per service if needed.
 
+### Release Notes Automation
+
+This project uses an automated release notes generation system that:
+
+- **Automatically categorizes commits** by type (features, bug fixes, breaking changes, etc.)
+- **Generates structured release notes** when new versions are published
+- **Provides templates** for consistent release documentation
+- **Integrates with the CI/CD pipeline** for seamless releases
+
+Contributors can help improve release notes by:
+- Using [Conventional Commits](https://www.conventionalcommits.org/) format
+- Filling out PR templates with appropriate categorization
+- Including clear descriptions of user-facing changes
+
+See [`docs/automated-release-notes.md`](docs/automated-release-notes.md) for detailed documentation.
+
 ### Roadmap / Ideas
 - Plugin hook execution pipeline
 - Healthchecks and depends_on in `compose.yaml`
