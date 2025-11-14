@@ -25,6 +25,9 @@ This template is used to automatically generate release notes for create-polyglo
 ### 🎉 Other Changes
 {other}
 
+### 🔄 Refactoring & Performance
+{refactoring}
+
 ---
 
 **Full Changelog**: {compare_url}
