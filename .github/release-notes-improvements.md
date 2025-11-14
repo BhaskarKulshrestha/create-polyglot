@@ -1,1 +1,1 @@
-# Additional template improvements
+<!-- This file tracks improvements to the release notes system -->
