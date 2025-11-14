@@ -87,6 +87,10 @@ sections:
   other:
     title: "🎉 Other Changes"
     description: "Other notable changes that don't fit the above categories"
+    
+  refactoring:
+    title: "🔄 Refactoring & Performance"
+    description: "Code quality improvements and performance optimizations"
 
 # Template configuration
 template:
