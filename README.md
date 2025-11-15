@@ -14,7 +14,7 @@
 [![npm downloads](https://img.shields.io/npm/dw/create-polyglot.svg)](https://www.npmjs.com/package/create-polyglot)
 
 <strong>Scaffold a modern polyglot microservices monorepo in seconds.</strong><br/>
-Generate Node.js, Python (FastAPI), Go, Java (Spring Boot), and Next.js frontend services with optional Turborepo or Nx presets, Docker Compose, shared packages, plugin hooks, and a persisted configuration file.
+Generate Node.js, Python (FastAPI), Go, Java (Spring Boot), Next.js, plus optional modern frontend frameworks (Remix, Astro, SvelteKit) with Turborepo or Nx presets, Docker Compose, shared packages, plugin hooks, and a persisted configuration file.
 
 </div>
 
@@ -54,7 +54,7 @@ Use it to prototype architectures, onboard teams faster, or spin up reproducible
 
 ## Features
 
-- 🚀 Rapid polyglot monorepo scaffolding (Node.js, Python/FastAPI, Go, Java Spring Boot, Next.js)
+- 🚀 Rapid polyglot monorepo scaffolding (Node.js, Python/FastAPI, Go, Java Spring Boot, Next.js, Remix, Astro, SvelteKit)
 - 🧩 Optional presets: Turborepo, Nx, or Basic runner
 - 🐳 Automatic Dockerfile + Docker Compose generation
 - 🛠 Interactive wizard (or fully non-interactive via flags)
@@ -174,7 +174,7 @@ create-polyglot dev --docker
 ## Init Options
 | Flag | Description |
 |------|-------------|
-| `-s, --services <list>` | Comma separated services: `node,python,go,java,frontend` |
+| `-s, --services <list>` | Comma separated services: `node,python,go,java,frontend,remix,astro,sveltekit` |
 | `--preset <name>` | `turborepo`, `nx`, or `basic` (default auto -> asks) |
 | `--git` | Initialize git repo & initial commit |
 | `--no-install` | Skip dependency installation step |
