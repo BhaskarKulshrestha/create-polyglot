@@ -346,7 +346,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       } else if (svcType === 'astro') {
         try {
           console.log(chalk.cyan('⚙️  Running Astro generator (create-astro)...'));
-          await execa('npx', ['--yes', 'create-astro@latest', '--', '--template', 'minimal'], { cwd: dest, stdio: 'inherit' });
+          await execa('npx', ['--yes', 'create-astro@latest', '.', '--template', 'minimal', '--no-install', '--no-git'], { cwd: dest, stdio: 'inherit' });
           usedGenerator = true;
         } catch (e) {
           console.error(chalk.red(`❌ create-astro failed: ${e.message}. Aborting scaffold for this service.`));
@@ -354,11 +354,11 @@ export async function scaffoldMonorepo(projectNameArg, options) {
         }
       } else if (svcType === 'sveltekit') {
         try {
-          console.log(chalk.cyan('⚙️  Running SvelteKit generator (create-svelte)...'));
-          await execa('npx', ['--yes', 'create-svelte@latest', '.', '--template', 'skeleton'], { cwd: dest, stdio: 'inherit' });
+          console.log(chalk.cyan('⚙️  Running SvelteKit generator (sv create)...'));
+          await execa('npx', ['sv', 'create', '.', '--template', 'minimal', '--types', 'ts', '--no-install', '--no-add-ons'], { cwd: dest, stdio: 'inherit' });
           usedGenerator = true;
         } catch (e) {
-          console.error(chalk.red(`❌ create-svelte failed: ${e.message}. Aborting scaffold for this service.`));
+          console.error(chalk.red(`❌ sv create failed: ${e.message}. Aborting scaffold for this service.`));
           continue;
         }
       }
