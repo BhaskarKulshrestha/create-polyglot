@@ -139,12 +139,15 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       { title: 'Python (FastAPI)', value: 'python' },
       { title: 'Go (Fiber-like)', value: 'go' },
       { title: 'Java (Spring Boot)', value: 'java' },
-      { title: 'Frontend (Next.js)', value: 'frontend' }
+      { title: 'Frontend (Next.js)', value: 'frontend' },
+      { title: 'Remix', value: 'remix' },
+      { title: 'Astro', value: 'astro' },
+      { title: 'SvelteKit', value: 'sveltekit' }
     ];
     const templateMap = { java: 'spring-boot' };
     let services = [];
     const reservedNames = new Set(['scripts','packages','apps','node_modules','docker','compose','compose.yaml']);
-    const defaultPorts = { frontend: 3000, node: 3001, go: 3002, java: 3003, python: 3004 };
+  const defaultPorts = { frontend: 3000, node: 3001, go: 3002, java: 3003, python: 3004, remix: 3005, astro: 3006, sveltekit: 3007 };
 
     if (options.services) {
       const validValues = allServiceChoices.map(c => c.value);
@@ -330,29 +333,58 @@ export async function scaffoldMonorepo(projectNameArg, options) {
           console.log(chalk.yellow(`⚠️  create-next-app failed: ${e.message}. Using template.`));
         }
       }
+      // Strict external generators for new frameworks: abort on failure (no internal fallback yet)
+      if (svcType === 'remix') {
+        try {
+          console.log(chalk.cyan('⚙️  Running Remix generator (create-react-router with basic template)...'));
+          await execa('npx', ['--yes', 'create-react-router@latest', '.', '--template', 'remix-run/react-router/examples/basic', '--no-git-init', '--no-install'], { cwd: dest, stdio: 'inherit' });
+          usedGenerator = true;
+        } catch (e) {
+          console.error(chalk.red(`❌ create-react-router failed: ${e.message}. Aborting scaffold for this service.`));
+          continue; // skip creating this service
+        }
+      } else if (svcType === 'astro') {
+        try {
+          console.log(chalk.cyan('⚙️  Running Astro generator (create-astro)...'));
+          await execa('npx', ['--yes', 'create-astro@latest', '.', '--template', 'minimal', '--no-install', '--no-git'], { cwd: dest, stdio: 'inherit' });
+          usedGenerator = true;
+        } catch (e) {
+          console.error(chalk.red(`❌ create-astro failed: ${e.message}. Aborting scaffold for this service.`));
+          continue;
+        }
+      } else if (svcType === 'sveltekit') {
+        try {
+          console.log(chalk.cyan('⚙️  Running SvelteKit generator (sv create)...'));
+          await execa('npx', ['sv', 'create', '.', '--template', 'minimal', '--types', 'ts', '--no-install', '--no-add-ons'], { cwd: dest, stdio: 'inherit' });
+          usedGenerator = true;
+        } catch (e) {
+          console.error(chalk.red(`❌ sv create failed: ${e.message}. Aborting scaffold for this service.`));
+          continue;
+        }
+      }
       if (!usedGenerator) {
-        if (await fs.pathExists(src) && (await fs.readdir(src)).length > 0) {
-          await fs.copy(src, dest, { overwrite: true });
-          
-          // Dynamically update the name field in package.json for Node.js services
-          if (svcType === 'node') {
-            const packageJsonPath = path.join(dest, 'package.json');
-            if (await fs.pathExists(packageJsonPath)) {
-              const packageJson = await fs.readJSON(packageJsonPath);
-              packageJson.name = `@${projectNameArg || 'polyglot'}/${svcName}`; // Ensure unique name
-              await fs.writeJSON(packageJsonPath, packageJson, { spaces: 2 });
+        // Non-framework services use internal templates
+        if (svcType !== 'remix' && svcType !== 'astro' && svcType !== 'sveltekit') {
+          if (await fs.pathExists(src) && (await fs.readdir(src)).length > 0) {
+            await fs.copy(src, dest, { overwrite: true });
+            if (svcType === 'node') {
+              const packageJsonPath = path.join(dest, 'package.json');
+              if (await fs.pathExists(packageJsonPath)) {
+                const packageJson = await fs.readJSON(packageJsonPath);
+                packageJson.name = `@${projectNameArg || 'polyglot'}/${svcName}`;
+                await fs.writeJSON(packageJsonPath, packageJson, { spaces: 2 });
+              }
             }
-          }
-          
-          if (templateFolder === 'spring-boot') {
-            const propTxt = path.join(dest, 'src/main/resources/application.properties.txt');
-            const prop = path.join(dest, 'src/main/resources/application.properties');
-            if (await fs.pathExists(propTxt) && !(await fs.pathExists(prop))) {
-              await fs.move(propTxt, prop);
+            if (templateFolder === 'spring-boot') {
+              const propTxt = path.join(dest, 'src/main/resources/application.properties.txt');
+              const prop = path.join(dest, 'src/main/resources/application.properties');
+              if (await fs.pathExists(propTxt) && !(await fs.pathExists(prop))) {
+                await fs.move(propTxt, prop);
+              }
             }
+          } else {
+            await fs.writeFile(path.join(dest, 'README.md'), `# ${svcName} service\n\nScaffolded by create-polyglot.`);
           }
-        } else {
-          await fs.writeFile(path.join(dest, 'README.md'), `# ${svcName} service\n\nScaffolded by create-polyglot.`);
         }
       }
 
@@ -444,7 +476,7 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       const dockerfile = path.join(svcDir, 'Dockerfile');
       if (!(await fs.pathExists(dockerfile))) {
         let dockerContent = '';
-        if (svcObj.type === 'node' || svcObj.type === 'frontend') {
+  if (svcObj.type === 'node' || svcObj.type === 'frontend' || ['remix','astro','sveltekit'].includes(svcObj.type)) {
           dockerContent = `# ${svcObj.name} (${svcObj.type}) service\nFROM node:20-alpine AS deps\nWORKDIR /app\nCOPY package*.json ./\nRUN npm install --omit=dev || true\nCOPY . .\nEXPOSE ${port}\nCMD [\"npm\", \"run\", \"dev\"]\n`;
         } else if (svcObj.type === 'python') {
           dockerContent = `FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt ./\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY . .\nEXPOSE ${port}\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"${port}\"]\n`;

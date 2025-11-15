@@ -55,7 +55,7 @@ program
   .description('Add a new service or plugin')
   .argument('<entity>', 'service | plugin')
   .argument('<name>', 'Name of the service or plugin')
-  .option('--type <type>', 'Service type (node|python|go|java|frontend)')
+  .option('--type <type>', 'Service type (node|python|go|java|frontend|remix|astro|sveltekit)')
   .option('--lang <type>', '(Deprecated) Alias of --type')
   .option('--port <port>', 'Service port')
   .option('--yes', 'Non-interactive defaults')
@@ -74,7 +74,10 @@ program
               { title: 'Python', value: 'python' },
               { title: 'Go', value: 'go' },
               { title: 'Java', value: 'java' },
-              { title: 'Frontend (Next.js)', value: 'frontend' }
+              { title: 'Frontend (Next.js)', value: 'frontend' },
+              { title: 'Remix', value: 'remix' },
+              { title: 'Astro', value: 'astro' },
+              { title: 'SvelteKit', value: 'sveltekit' }
             ] });
             type = ans.type;
           }
@@ -83,7 +86,7 @@ program
             if (ans.port) port = Number(ans.port);
           }
         }
-        const defaultPorts = { frontend: 3000, node: 3001, go: 3002, java: 3003, python: 3004 };
+  const defaultPorts = { frontend: 3000, node: 3001, go: 3002, java: 3003, python: 3004, remix: 3005, astro: 3006, sveltekit: 3007 };
         if (!type) throw new Error('Service type required');
         if (!port) port = defaultPorts[type];
         await addService(projectDir, { type, name, port }, opts);
