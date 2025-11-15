@@ -336,11 +336,11 @@ export async function scaffoldMonorepo(projectNameArg, options) {
       // Strict external generators for new frameworks: abort on failure (no internal fallback yet)
       if (svcType === 'remix') {
         try {
-          console.log(chalk.cyan('⚙️  Running Remix generator (create-remix)...'));
-          await execa('npx', ['--yes', 'create-remix@latest', '.', '--template', 'remix'], { cwd: dest, stdio: 'inherit' });
+          console.log(chalk.cyan('⚙️  Running Remix generator (create-react-router with basic template)...'));
+          await execa('npx', ['--yes', 'create-react-router@latest', '.', '--template', 'remix-run/react-router/examples/basic', '--no-git-init', '--no-install'], { cwd: dest, stdio: 'inherit' });
           usedGenerator = true;
         } catch (e) {
-          console.error(chalk.red(`❌ create-remix failed: ${e.message}. Aborting scaffold for this service.`));
+          console.error(chalk.red(`❌ create-react-router failed: ${e.message}. Aborting scaffold for this service.`));
           continue; // skip creating this service
         }
       } else if (svcType === 'astro') {
