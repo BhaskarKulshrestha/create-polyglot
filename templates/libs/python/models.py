@@ -24,8 +24,8 @@ class BaseModel:
 @dataclass
 class ServiceHealth(BaseModel):
     """Model for service health status."""
-    service_name: str
-    status: str  # "healthy", "degraded", "unhealthy"
+    service_name: str = ""
+    status: str = "unknown"  # "healthy", "degraded", "unhealthy"
     version: Optional[str] = None
     uptime: Optional[float] = None
     last_check: Optional[datetime.datetime] = None
@@ -34,6 +34,6 @@ class ServiceHealth(BaseModel):
 @dataclass 
 class ErrorResponse(BaseModel):
     """Model for standardized error responses."""
-    error_code: str
-    error_message: str
+    error_code: str = ""
+    error_message: str = ""
     details: Optional[dict] = None

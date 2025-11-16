@@ -1362,8 +1362,9 @@ export async function scaffoldSharedLibrary(projectDir, { type, name }, options 
     if (file.isFile()) {
       let content = await fs.readFile(path.join(templateDir, file.name), 'utf-8');
       
-      // Replace template variables
-      content = content.replace(/\{\{name\}\}/g, name);
+      // Replace template variables with appropriate naming conventions
+      const packageName = type === 'go' ? name.replace(/-/g, '_') : name;
+      content = content.replace(/\{\{name\}\}/g, packageName);
       
       // Handle special file name replacements
       let targetFileName = file.name;
