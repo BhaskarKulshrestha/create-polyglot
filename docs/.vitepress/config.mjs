@@ -19,7 +19,8 @@ export default defineConfig({
       { text: 'CLI', link: '/cli/' },
       { text: 'Templates', link: '/templates/' },
       { text: 'Configuration', link: '/configuration/polyglot-json' },
-      { text: 'Features', link: '/logs-feature' }
+      { text: 'Features', link: '/logs-feature' },
+      { text: 'FAQ', link: '/FAQ' }
     ],
     sidebar: {
       '/guide/': [
@@ -27,8 +28,10 @@ export default defineConfig({
         { text: 'Getting Started', link: '/guide/getting-started' },
         { text: 'Presets', link: '/guide/presets' },
         { text: 'Docker & Compose', link: '/guide/docker' },
-  { text: 'Extending (New Service)', link: '/guide/extending-service' },
-  { text: 'Frontend Frameworks', link: '/guide/frontend-frameworks' },
+        { text: 'Extending (New Service)', link: '/guide/extending-service' },
+        { text: 'Frontend Frameworks', link: '/guide/frontend-frameworks' },
+        { text: 'Shared Libraries', link: '/guide/shared-libraries' },
+        { text: 'Troubleshooting', link: '/guide/troubleshooting' },
         { text: 'Service Logs', link: '/logs-feature' },
         { text: 'Plugin System', link: '/plugin-system' },
         { text: 'Service Controls', link: '/service-controls-feature' },
