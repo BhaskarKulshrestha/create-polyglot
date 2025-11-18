@@ -49,7 +49,7 @@ jobs:
       - run: npm test
 
   publish-npm:
-    needs: [generate-release-notes, build]
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
