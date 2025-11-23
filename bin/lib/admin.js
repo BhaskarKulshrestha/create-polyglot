@@ -513,6 +513,10 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       scheduleCountdown();
       setTimeout(fetchStatus, REFRESH_MS); // initial schedule
       initializeLogs();
+      initializeMetricsCharts();
+      
+      // Start metrics updates
+      setInterval(updateMetricsCharts, 5000); // Update every 5 seconds
       
       // Event delegation for service control buttons
       document.addEventListener('click', function(event) {
@@ -763,6 +767,166 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       }, 3000);
     }
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // Metrics visualization with Chart.js
+    let metricsCharts = {};
+    
+    function initializeMetricsCharts() {
+      // CPU Chart
+      const cpuCtx = document.getElementById('cpu-chart');
+      if (cpuCtx) {
+        metricsCharts.cpu = new Chart(cpuCtx, {
+          type: 'line',
+          data: {
+            labels: [],
+            datasets: [{
+              label: 'CPU Usage %',
+              data: [],
+              borderColor: 'rgb(75, 192, 192)',
+              backgroundColor: 'rgba(75, 192, 192, 0.1)',
+              tension: 0.1
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: { y: { beginAtZero: true, max: 100 } }
+          }
+        });
+      }
+      
+      // Memory Chart  
+      const memoryCtx = document.getElementById('memory-chart');
+      if (memoryCtx) {
+        metricsCharts.memory = new Chart(memoryCtx, {
+          type: 'line',
+          data: {
+            labels: [],
+            datasets: [{
+              label: 'Memory Usage %',
+              data: [],
+              borderColor: 'rgb(255, 99, 132)',
+              backgroundColor: 'rgba(255, 99, 132, 0.1)',
+              tension: 0.1
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: { y: { beginAtZero: true, max: 100 } }
+          }
+        });
+      }
+      
+      // Network Chart
+      const networkCtx = document.getElementById('network-chart');
+      if (networkCtx) {
+        metricsCharts.network = new Chart(networkCtx, {
+          type: 'line',
+          data: {
+            labels: [],
+            datasets: [{
+              label: 'Network RX (MB/s)',
+              data: [],
+              borderColor: 'rgb(54, 162, 235)',
+              backgroundColor: 'rgba(54, 162, 235, 0.1)',
+              tension: 0.1
+            }, {
+              label: 'Network TX (MB/s)',
+              data: [],
+              borderColor: 'rgb(255, 206, 86)',
+              backgroundColor: 'rgba(255, 206, 86, 0.1)',
+              tension: 0.1
+            }]
+          },
+          options: {
+            responsive: true,
+            scales: { y: { beginAtZero: true } }
+          }
+        });
+      }
+      
+      // Disk Chart
+      const diskCtx = document.getElementById('disk-chart');
+      if (diskCtx) {
+        metricsCharts.disk = new Chart(diskCtx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Used', 'Available'],
+            datasets: [{
+              data: [0, 100],
+              backgroundColor: ['rgb(255, 99, 132)', 'rgb(75, 192, 192)']
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { position: 'bottom' }
+            }
+          }
+        });
+      }
+    }
+    
+    async function updateMetricsCharts() {
+      try {
+        const response = await fetch('/api/metrics');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const timestamp = new Date().toLocaleTimeString();
+        
+        // Update CPU chart
+        if (metricsCharts.cpu && data.metrics.cpu) {
+          const chart = metricsCharts.cpu;
+          chart.data.labels.push(timestamp);
+          chart.data.datasets[0].data.push(data.metrics.cpu.percent || 0);
+          if (chart.data.labels.length > 20) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+          }
+          chart.update('none');
+        }
+        
+        // Update Memory chart
+        if (metricsCharts.memory && data.metrics.memory) {
+          const chart = metricsCharts.memory;
+          chart.data.labels.push(timestamp);
+          chart.data.datasets[0].data.push(data.metrics.memory.percent || 0);
+          if (chart.data.labels.length > 20) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+          }
+          chart.update('none');
+        }
+        
+        // Update Network chart
+        if (metricsCharts.network && data.metrics.network) {
+          const chart = metricsCharts.network;
+          chart.data.labels.push(timestamp);
+          chart.data.datasets[0].data.push((data.metrics.network.rx_sec || 0) / (1024 * 1024)); // MB/s
+          chart.data.datasets[1].data.push((data.metrics.network.tx_sec || 0) / (1024 * 1024)); // MB/s
+          if (chart.data.labels.length > 20) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[1].data.shift();
+          }
+          chart.update('none');
+        }
+        
+        // Update Disk chart
+        if (metricsCharts.disk && data.metrics.disk) {
+          const chart = metricsCharts.disk;
+          const used = data.metrics.disk.used || 0;
+          const total = data.metrics.disk.total || 1;
+          const available = total - used;
+          chart.data.datasets[0].data = [used, available];
+          chart.update('none');
+        }
+      } catch (e) {
+        console.warn('Failed to update metrics charts:', e);
+      }
+    }
+  </script>
 </head>
 <body>
   <header>
@@ -843,6 +1007,33 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
         </tbody>
       </table>`}
       
+      <!-- Metrics Section -->
+      <div class="metrics-section" style="margin-top:30px;">
+        <div style="margin-bottom:20px;">
+          <h2 style="font-size:1rem; font-weight:600; color:#334155; margin:0 0 16px;">Resource Monitoring</h2>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-bottom:20px;">
+            <div style="background:#fff; padding:16px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+              <h3 style="font-size:0.9rem; margin:0 0 12px; color:#374151;">CPU Usage</h3>
+              <canvas id="cpu-chart" width="400" height="200"></canvas>
+            </div>
+            <div style="background:#fff; padding:16px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+              <h3 style="font-size:0.9rem; margin:0 0 12px; color:#374151;">Memory Usage</h3>
+              <canvas id="memory-chart" width="400" height="200"></canvas>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+            <div style="background:#fff; padding:16px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+              <h3 style="font-size:0.9rem; margin:0 0 12px; color:#374151;">Network I/O</h3>
+              <canvas id="network-chart" width="400" height="200"></canvas>
+            </div>
+            <div style="background:#fff; padding:16px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+              <h3 style="font-size:0.9rem; margin:0 0 12px; color:#374151;">Disk I/O</h3>
+              <canvas id="disk-chart" width="400" height="200"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <!-- Logs Section -->
       <div class="logs-section">
         <div class="logs-header">
@@ -907,6 +1098,79 @@ export async function startAdminDashboard(options = {}) {
   console.log(chalk.yellow('   Press Ctrl+C to stop\n'));
 
   // Initialize log file watcher
+// Helper function to get system metrics
+async function getSystemMetrics() {
+  try {
+    // Import systeminformation dynamically to avoid dependency issues in tests
+    const si = await import('systeminformation');
+    
+    const [cpuInfo, cpuLoad, memory, networkStats, disk] = await Promise.all([
+      si.cpu().catch(() => ({})),
+      si.currentLoad().catch(() => ({ currentLoad: 0 })),
+      si.mem().catch(() => ({})),
+      si.networkStats().catch(() => ([])),
+      si.fsSize().catch(() => ([]))
+    ]);
+    
+    // Calculate network totals
+    const networkTotals = networkStats.reduce((totals, iface) => {
+      if (iface.iface && !iface.iface.startsWith('lo')) { // Skip loopback
+        totals.rx_bytes += iface.rx_bytes || 0;
+        totals.tx_bytes += iface.tx_bytes || 0;
+        totals.rx_sec += iface.rx_sec || 0;
+        totals.tx_sec += iface.tx_sec || 0;
+      }
+      return totals;
+    }, { rx_bytes: 0, tx_bytes: 0, rx_sec: 0, tx_sec: 0 });
+    
+    // Calculate disk totals
+    const diskTotals = disk.reduce((totals, volume) => {
+      if (volume.mount === '/' || volume.mount.startsWith('/')) {
+        totals.total += volume.size || 0;
+        totals.used += volume.used || 0;
+        totals.available += volume.available || 0;
+      }
+      return totals;
+    }, { total: 0, used: 0, available: 0 });
+    
+    return {
+      cpu: {
+        cores: cpuInfo.cores || 0,
+        model: cpuInfo.model || 'Unknown',
+        speed: cpuInfo.speed || 0,
+        percent: Math.round(cpuLoad.currentLoad || 0)
+      },
+      memory: {
+        total: memory.total || 0,
+        used: memory.used || 0,
+        available: memory.available || memory.total - memory.used || 0,
+        percent: memory.total ? ((memory.used / memory.total) * 100) : 0
+      },
+      network: {
+        interfaces: networkStats.map(iface => iface.iface).filter(name => name && !name.startsWith('lo')),
+        total_rx: networkTotals.rx_bytes,
+        total_tx: networkTotals.tx_bytes,
+        rx_sec: networkTotals.rx_sec,
+        tx_sec: networkTotals.tx_sec
+      },
+      disk: {
+        total: diskTotals.total,
+        used: diskTotals.used,
+        available: diskTotals.available,
+        percent: diskTotals.total ? ((diskTotals.used / diskTotals.total) * 100) : 0
+      }
+    };
+  } catch (error) {
+    console.warn('Failed to get system metrics:', error.message);
+    return {
+      cpu: { cores: 0, model: 'Unknown', speed: 0, percent: 0 },
+      memory: { total: 0, used: 0, available: 0, percent: 0 },
+      network: { interfaces: [], total_rx: 0, total_tx: 0, rx_sec: 0, tx_sec: 0 },
+      disk: { total: 0, used: 0, available: 0, percent: 0 }
+    };
+  }
+}
+
   globalLogWatcher = new LogFileWatcher(cwd);
   try {
     await globalLogWatcher.startWatching();
@@ -963,6 +1227,40 @@ export async function startAdminDashboard(options = {}) {
         res.end(JSON.stringify(logs, null, 2));
       } catch (e) {
         console.error('❌ Logs API error:', e.message);
+        res.writeHead(500, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+      return;
+    }
+    
+    if (url.pathname === '/api/metrics') {
+      // API endpoint for system and service metrics
+      try {
+        const metrics = await getSystemMetrics();
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({
+          metrics: {
+            timestamp: new Date().toISOString(),
+            cpu: metrics.cpu || {},
+            memory: metrics.memory || {},
+            network: metrics.network || {},
+            disk: metrics.disk || {}
+          },
+          systemInfo: {
+            cpu: { cores: metrics.cpu?.cores || 0, model: metrics.cpu?.model || 'Unknown' },
+            memory: { total: metrics.memory?.total || 0 },
+            disk: { total: metrics.disk?.total || 0, available: metrics.disk?.available || 0 },
+            network: { interfaces: metrics.network?.interfaces || [] }
+          }
+        }, null, 2));
+      } catch (e) {
+        console.error('❌ Metrics API error:', e.message);
         res.writeHead(500, {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*'
