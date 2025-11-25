@@ -157,8 +157,14 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
     .sidebar h2 { font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin:0 0 4px; color:#94a3b8; }
     .service-list { list-style:none; margin:0; padding:0; }
     .service-list li { margin:0 0 6px; }
-    .svc-link { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px; font-size:.85rem; line-height:1.2; background:#334155; transition:background .15s ease; }
+    .svc-link { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px; font-size:.85rem; line-height:1.2; background:#334155; transition:background .15s ease; cursor:pointer; text-decoration:none; color:#e2e8f0; }
     .svc-link:hover { background:#475569; }
+    .svc-link.active { background:#0369a1; }
+    .nav-section { margin-bottom:20px; }
+    .nav-link { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:6px; font-size:.85rem; line-height:1.2; background:#334155; transition:background .15s ease; cursor:pointer; text-decoration:none; color:#e2e8f0; margin-bottom:6px; }
+    .nav-link:hover { background:#475569; }
+    .nav-link.active { background:#0369a1; font-weight:600; }
+    .nav-icon { font-size:1rem; }
     .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; box-shadow:0 0 0 2px rgba(0,0,0,0.15) inset; }
     .dot.up { background:#0d9488; }
     .dot.down { background:#dc2626; }
@@ -218,11 +224,15 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
     .dot.starting { background:#f59e0b; }
     .dot.external { background:#8b5cf6; }
     
+    .page-container { display:none; }
+    .page-container.active { display:block; }
+    
     @media (max-width: 920px) { .layout { flex-direction:column; } .sidebar { width:100%; flex-direction:row; flex-wrap:wrap; } .service-list { display:flex; flex-wrap:wrap; gap:8px; } .service-list li { margin:0; } }
   </style>
   <script>
     var REFRESH_MS = ${refreshInterval};
     var nextRefreshLabel;
+    var currentPage = 'dashboard'; // Track current page: 'dashboard' or 'resources'
     
     function startService(serviceName) {
       // Show loading state
@@ -513,6 +523,13 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       scheduleCountdown();
       setTimeout(fetchStatus, REFRESH_MS); // initial schedule
       initializeLogs();
+      initializeMetricsCharts();
+      
+      // Start metrics updates
+      setInterval(updateMetricsCharts, 5000); // Update every 5 seconds
+      
+      // Initialize navigation
+      initializeNavigation();
       
       // Event delegation for service control buttons
       document.addEventListener('click', function(event) {
@@ -530,6 +547,52 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
         }
       });
     });
+    
+    // Navigation handling
+    function initializeNavigation() {
+      // Set up click handlers for navigation links
+      document.querySelectorAll('.nav-link').forEach(function(link) {
+        link.addEventListener('click', function(e) {
+          e.preventDefault();
+          var page = this.getAttribute('data-page');
+          if (page) {
+            navigateToPage(page);
+          }
+        });
+      });
+      
+      // Show initial page
+      navigateToPage('dashboard');
+    }
+    
+    function navigateToPage(pageName) {
+      currentPage = pageName;
+      
+      // Update active navigation link
+      document.querySelectorAll('.nav-link').forEach(function(link) {
+        if (link.getAttribute('data-page') === pageName) {
+          link.classList.add('active');
+        } else {
+          link.classList.remove('active');
+        }
+      });
+      
+      // Show/hide page containers
+      document.querySelectorAll('.page-container').forEach(function(container) {
+        if (container.id === pageName + '-page') {
+          container.classList.add('active');
+        } else {
+          container.classList.remove('active');
+        }
+      });
+      
+      // Update page title
+      var pageTitle = pageName === 'dashboard' ? 'Service Overview' : 'Resource Consumption';
+      var toolbar = document.querySelector('.toolbar > div');
+      if (toolbar) {
+        toolbar.textContent = pageTitle;
+      }
+    }
     
     // Logs functionality (auto-stream)
     let currentLogsFilter = {};
@@ -763,6 +826,288 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       }, 3000);
     }
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // Metrics visualization with Chart.js
+    let metricsCharts = {};
+    
+    function initializeMetricsCharts() {
+      // CPU Chart
+      const cpuCtx = document.getElementById('cpu-chart');
+      if (cpuCtx) {
+        metricsCharts.cpu = new Chart(cpuCtx, {
+          type: 'line',
+          data: {
+            labels: [],
+            datasets: [{
+              label: 'CPU Usage %',
+              data: [],
+              borderColor: 'rgb(59, 130, 246)',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              borderWidth: 2,
+              tension: 0.3,
+              fill: true
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 2.5,
+            scales: { 
+              y: { 
+                beginAtZero: true, 
+                max: 100,
+                ticks: { font: { size: 11 } }
+              },
+              x: { ticks: { font: { size: 10 } } }
+            },
+            plugins: {
+              legend: { display: false }
+            }
+          }
+        });
+      }
+      
+      // Memory Chart  
+      const memoryCtx = document.getElementById('memory-chart');
+      if (memoryCtx) {
+        metricsCharts.memory = new Chart(memoryCtx, {
+          type: 'line',
+          data: {
+            labels: [],
+            datasets: [{
+              label: 'Memory Usage %',
+              data: [],
+              borderColor: 'rgb(168, 85, 247)',
+              backgroundColor: 'rgba(168, 85, 247, 0.1)',
+              borderWidth: 2,
+              tension: 0.3,
+              fill: true
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 2.5,
+            scales: { 
+              y: { 
+                beginAtZero: true, 
+                max: 100,
+                ticks: { font: { size: 11 } }
+              },
+              x: { ticks: { font: { size: 10 } } }
+            },
+            plugins: {
+              legend: { display: false }
+            }
+          }
+        });
+      }
+      
+      // Network Chart
+      const networkCtx = document.getElementById('network-chart');
+      if (networkCtx) {
+        metricsCharts.network = new Chart(networkCtx, {
+          type: 'line',
+          data: {
+            labels: [],
+            datasets: [{
+              label: 'Download (KB/s)',
+              data: [],
+              borderColor: 'rgb(34, 197, 94)',
+              backgroundColor: 'rgba(34, 197, 94, 0.1)',
+              borderWidth: 2,
+              tension: 0.3,
+              fill: true
+            }, {
+              label: 'Upload (KB/s)',
+              data: [],
+              borderColor: 'rgb(251, 146, 60)',
+              backgroundColor: 'rgba(251, 146, 60, 0.1)',
+              borderWidth: 2,
+              tension: 0.3,
+              fill: true
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 2.5,
+            scales: { 
+              y: { 
+                beginAtZero: true,
+                ticks: { font: { size: 11 } }
+              },
+              x: { ticks: { font: { size: 10 } } }
+            },
+            plugins: {
+              legend: { 
+                display: true,
+                position: 'top',
+                labels: { font: { size: 10 }, boxWidth: 12 }
+              }
+            }
+          }
+        });
+      }
+      
+      // Disk Chart
+      const diskCtx = document.getElementById('disk-chart');
+      if (diskCtx) {
+        metricsCharts.disk = new Chart(diskCtx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Used', 'Available'],
+            datasets: [{
+              data: [0, 100],
+              backgroundColor: ['rgb(239, 68, 68)', 'rgb(34, 197, 94)'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 2.5,
+            plugins: {
+              legend: { 
+                position: 'bottom',
+                labels: { font: { size: 11 }, padding: 10 }
+              }
+            }
+          }
+        });
+      }
+    }
+    
+    async function updateMetricsCharts() {
+      try {
+        const response = await fetch('/api/metrics');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const timestamp = new Date().toLocaleTimeString();
+        
+        // Update CPU chart
+        if (metricsCharts.cpu && data.metrics.cpu) {
+          const chart = metricsCharts.cpu;
+          chart.data.labels.push(timestamp);
+          chart.data.datasets[0].data.push(data.metrics.cpu.percent || 0);
+          if (chart.data.labels.length > 20) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+          }
+          chart.update('none');
+        }
+        
+        // Update Memory chart
+        if (metricsCharts.memory && data.metrics.memory) {
+          const chart = metricsCharts.memory;
+          chart.data.labels.push(timestamp);
+          chart.data.datasets[0].data.push(data.metrics.memory.percent || 0);
+          if (chart.data.labels.length > 20) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+          }
+          chart.update('none');
+        }
+        
+        // Update Network chart
+        if (metricsCharts.network && data.metrics.network) {
+          const chart = metricsCharts.network;
+          chart.data.labels.push(timestamp);
+          chart.data.datasets[0].data.push(parseFloat(((data.metrics.network.rx_sec || 0) / 1024).toFixed(2))); // KB/s
+          chart.data.datasets[1].data.push(parseFloat(((data.metrics.network.tx_sec || 0) / 1024).toFixed(2))); // KB/s
+          if (chart.data.labels.length > 20) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+            chart.data.datasets[1].data.shift();
+          }
+          chart.update('none');
+        }
+        
+        // Update Disk chart
+        if (metricsCharts.disk && data.metrics.disk) {
+          const chart = metricsCharts.disk;
+          const used = data.metrics.disk.used || 0;
+          const total = data.metrics.disk.total || 1;
+          const available = total - used;
+          chart.data.datasets[0].data = [used, available];
+          chart.update('none');
+        }
+        
+        // Update resources page if active
+        if (currentPage === 'resources') {
+          updateResourcesPage(data);
+        }
+      } catch (e) {
+        console.warn('Failed to update metrics charts:', e);
+      }
+    }
+    
+    // Resource consumption page functionality
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+    
+    function updateResourcesPage(data) {
+      const container = document.querySelector('#resources-content');
+      if (!container) return;
+      
+      const metrics = data.metrics || {};
+      const systemInfo = data.systemInfo || {};
+      
+      // Build system overview card
+      let html = '<div style="background:#fff; padding:20px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1); margin-bottom:20px;">';
+      html += '<h3 style="margin:0 0 16px; font-size:1rem; font-weight:600; color:#0f172a;">System Overview</h3>';
+      html += '<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">';
+      
+      // CPU
+      html += '<div style="padding:12px; background:#f8fafc; border-radius:6px;">';
+      html += '<div style="font-size:0.7rem; color:#64748b; font-weight:600; text-transform:uppercase; margin-bottom:4px;">CPU</div>';
+      html += '<div style="font-size:1.5rem; font-weight:700; color:#0f172a; margin-bottom:4px;">' + (metrics.cpu?.percent || 0).toFixed(1) + '%</div>';
+      html += '<div style="font-size:0.7rem; color:#475569;">' + (systemInfo.cpu?.cores || 0) + ' cores · ' + (systemInfo.cpu?.model || 'Unknown') + '</div>';
+      html += '</div>';
+      
+      // Memory
+      const memTotal = systemInfo.memory?.total || 0;
+      const memUsed = metrics.memory?.used || 0;
+      html += '<div style="padding:12px; background:#f8fafc; border-radius:6px;">';
+      html += '<div style="font-size:0.7rem; color:#64748b; font-weight:600; text-transform:uppercase; margin-bottom:4px;">Memory</div>';
+      html += '<div style="font-size:1.5rem; font-weight:700; color:#0f172a; margin-bottom:4px;">' + (metrics.memory?.percent || 0).toFixed(1) + '%</div>';
+      html += '<div style="font-size:0.7rem; color:#475569;">' + formatBytes(memUsed) + ' / ' + formatBytes(memTotal) + '</div>';
+      html += '</div>';
+      
+      // Disk
+      const diskTotal = systemInfo.disk?.total || 0;
+      const diskUsed = metrics.disk?.used || 0;
+      html += '<div style="padding:12px; background:#f8fafc; border-radius:6px;">';
+      html += '<div style="font-size:0.7rem; color:#64748b; font-weight:600; text-transform:uppercase; margin-bottom:4px;">Disk</div>';
+      html += '<div style="font-size:1.5rem; font-weight:700; color:#0f172a; margin-bottom:4px;">' + (metrics.disk?.percent || 0).toFixed(1) + '%</div>';
+      html += '<div style="font-size:0.7rem; color:#475569;">' + formatBytes(diskUsed) + ' / ' + formatBytes(diskTotal) + '</div>';
+      html += '</div>';
+      
+      // Network
+      html += '<div style="padding:12px; background:#f8fafc; border-radius:6px;">';
+      html += '<div style="font-size:0.7rem; color:#64748b; font-weight:600; text-transform:uppercase; margin-bottom:4px;">Network</div>';
+      html += '<div style="font-size:1rem; font-weight:700; color:#0f172a; margin-bottom:4px;">↓ ' + formatBytes(metrics.network?.rx_sec || 0) + '/s</div>';
+      html += '<div style="font-size:0.8rem; font-weight:600; color:#475569;">↑ ' + formatBytes(metrics.network?.tx_sec || 0) + '/s</div>';
+      html += '</div>';
+      
+      html += '</div></div>';
+      
+      // Per-service resource info (fetch from /api/services/resources if available)
+      html += '<div style="background:#fff; padding:20px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">';
+      html += '<h3 style="margin:0 0 16px; font-size:1rem; font-weight:600; color:#0f172a;">Service Resource Usage</h3>';
+      html += '<p style="color:#64748b; font-size:0.85rem; margin:0;">Detailed per-service resource metrics will be displayed here when services are running with PID tracking enabled.</p>';
+      html += '</div>';
+      
+      container.innerHTML = html;
+    }
+  </script>
 </head>
 <body>
   <header>
@@ -771,18 +1116,29 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
   </header>
   <div class="layout">
     <aside class="sidebar">
-      <div>
+      <div class="nav-section">
+        <h2>Navigation</h2>
+        <a class="nav-link" data-page="dashboard">
+          <span class="nav-icon">📊</span>
+          <span>Dashboard</span>
+        </a>
+        <a class="nav-link" data-page="resources">
+          <span class="nav-icon">⚡</span>
+          <span>Resource Consumption</span>
+        </a>
+      </div>
+      <div class="nav-section">
         <h2>Services</h2>
         <ul class="service-list">
           ${servicesWithStatus.map(s => `<li><a class="svc-link" href="#row-${s.name}"><span class="dot ${s.status}"></span><span>${s.name}</span></a></li>`).join('') || '<li style="font-size:.8rem;color:#64748b;">No services</li>'}
         </ul>
       </div>
-      <div>
+      <div class="nav-section">
         <h2>Status Legend</h2>
         <ul class="service-list" style="font-size:.65rem;">
-          <li class="svc-link" style="background:#334155"><span class="dot up"></span>UP</li>
-          <li class="svc-link" style="background:#334155"><span class="dot down"></span>DOWN</li>
-          <li class="svc-link" style="background:#334155"><span class="dot error"></span>ERROR</li>
+          <li class="svc-link" style="background:#334155;cursor:default;"><span class="dot up"></span>UP</li>
+          <li class="svc-link" style="background:#334155;cursor:default;"><span class="dot down"></span>DOWN</li>
+          <li class="svc-link" style="background:#334155;cursor:default;"><span class="dot error"></span>ERROR</li>
         </ul>
       </div>
     </aside>
@@ -791,6 +1147,9 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
         <div style="font-size:.8rem; font-weight:500; color:#334155;">Service Overview</div>
         <div class="refresh">Next refresh in ${(refreshInterval/1000).toFixed(1)}s</div>
       </div>
+      
+      <!-- Dashboard Page -->
+      <div id="dashboard-page" class="page-container">
       ${servicesWithStatus.length === 0 ? `<div class="empty">No services found. Run inside a generated polyglot workspace.</div>` : `
       <table>
         <thead>
@@ -871,6 +1230,58 @@ function generateDashboardHTML(servicesWithStatus, refreshInterval = 5000) {
       </div>
       
       <div class="footer">Polyglot Admin · Generated by create-polyglot</div>
+      </div>
+      <!-- End Dashboard Page -->
+      
+      <!-- Resource Consumption Page -->
+      <div id="resources-page" class="page-container">
+        <h2 style="font-size:1.2rem; font-weight:600; color:#0f172a; margin:0 0 20px;">Resource Monitoring</h2>
+        
+        <!-- System-wide Metrics Charts -->
+        <div class="metrics-section" style="margin-bottom:30px;">
+          <div style="margin-bottom:20px;">
+            <h3 style="font-size:1rem; font-weight:600; color:#334155; margin:0 0 16px;">System Resource Usage</h3>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:16px;">
+              <div style="background:#fff; padding:20px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                <h4 style="font-size:0.85rem; margin:0 0 12px; color:#374151; font-weight:600;">CPU Usage</h4>
+                <div style="height:160px; position:relative;">
+                  <canvas id="cpu-chart"></canvas>
+                </div>
+              </div>
+              <div style="background:#fff; padding:20px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                <h4 style="font-size:0.85rem; margin:0 0 12px; color:#374151; font-weight:600;">Memory Usage</h4>
+                <div style="height:160px; position:relative;">
+                  <canvas id="memory-chart"></canvas>
+                </div>
+              </div>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+              <div style="background:#fff; padding:20px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                <h4 style="font-size:0.85rem; margin:0 0 12px; color:#374151; font-weight:600;">Network I/O</h4>
+                <div style="height:160px; position:relative;">
+                  <canvas id="network-chart"></canvas>
+                </div>
+              </div>
+              <div style="background:#fff; padding:20px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                <h4 style="font-size:0.85rem; margin:0 0 12px; color:#374151; font-weight:600;">Disk Usage</h4>
+                <div style="height:160px; position:relative;">
+                  <canvas id="disk-chart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Per-service Resource Details -->
+        <div id="resources-content" style="display:grid; gap:20px;">
+          <div style="background:#fff; padding:20px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+            <p style="color:#64748b; text-align:center; padding:40px 20px;">Loading per-service resource metrics...</p>
+          </div>
+        </div>
+        
+        <div class="footer" style="margin-top:40px;">Polyglot Admin · Generated by create-polyglot</div>
+      </div>
+      <!-- End Resource Consumption Page -->
     </main>
   </div>
 </body>
@@ -907,6 +1318,77 @@ export async function startAdminDashboard(options = {}) {
   console.log(chalk.yellow('   Press Ctrl+C to stop\n'));
 
   // Initialize log file watcher
+// Helper function to get system metrics
+async function getSystemMetrics() {
+  try {
+    // Import systeminformation dynamically to avoid dependency issues in tests
+    const si = await import('systeminformation');
+    
+    const [cpuInfo, cpuLoad, memory, networkStats, disk] = await Promise.all([
+      si.cpu().catch(() => ({})),
+      si.currentLoad().catch(() => ({ currentLoad: 0 })),
+      si.mem().catch(() => ({})),
+      si.networkStats().catch(() => ([])),
+      si.fsSize().catch(() => ([]))
+    ]);
+    
+    // Calculate network totals
+    const networkTotals = networkStats.reduce((totals, iface) => {
+      if (iface.iface && !iface.iface.startsWith('lo')) { // Skip loopback
+        totals.rx_bytes += iface.rx_bytes || 0;
+        totals.tx_bytes += iface.tx_bytes || 0;
+        totals.rx_sec += iface.rx_sec || 0;
+        totals.tx_sec += iface.tx_sec || 0;
+      }
+      return totals;
+    }, { rx_bytes: 0, tx_bytes: 0, rx_sec: 0, tx_sec: 0 });
+    
+    // Calculate disk totals - only use root volume to avoid duplicates
+    const rootVolume = disk.find(volume => volume.mount === '/') || disk[0] || {};
+    const diskTotals = {
+      total: rootVolume.size || 0,
+      used: rootVolume.used || 0,
+      available: rootVolume.available || 0
+    };
+    
+    return {
+      cpu: {
+        cores: cpuInfo.cores || 0,
+        model: cpuInfo.model || 'Unknown',
+        speed: cpuInfo.speed || 0,
+        percent: parseFloat((cpuLoad.currentLoad || 0).toFixed(1))
+      },
+      memory: {
+        total: memory.total || 0,
+        used: memory.active || memory.used || 0,
+        available: memory.available || 0,
+        percent: memory.total ? (((memory.active || memory.used || 0) / memory.total) * 100) : 0
+      },
+      network: {
+        interfaces: networkStats.map(iface => iface.iface).filter(name => name && !name.startsWith('lo')),
+        total_rx: networkTotals.rx_bytes,
+        total_tx: networkTotals.tx_bytes,
+        rx_sec: networkTotals.rx_sec,
+        tx_sec: networkTotals.tx_sec
+      },
+      disk: {
+        total: diskTotals.total,
+        used: diskTotals.used,
+        available: diskTotals.available,
+        percent: diskTotals.total ? ((diskTotals.used / diskTotals.total) * 100) : 0
+      }
+    };
+  } catch (error) {
+    console.warn('Failed to get system metrics:', error.message);
+    return {
+      cpu: { cores: 0, model: 'Unknown', speed: 0, percent: 0 },
+      memory: { total: 0, used: 0, available: 0, percent: 0 },
+      network: { interfaces: [], total_rx: 0, total_tx: 0, rx_sec: 0, tx_sec: 0 },
+      disk: { total: 0, used: 0, available: 0, percent: 0 }
+    };
+  }
+}
+
   globalLogWatcher = new LogFileWatcher(cwd);
   try {
     await globalLogWatcher.startWatching();
@@ -963,6 +1445,40 @@ export async function startAdminDashboard(options = {}) {
         res.end(JSON.stringify(logs, null, 2));
       } catch (e) {
         console.error('❌ Logs API error:', e.message);
+        res.writeHead(500, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+      return;
+    }
+    
+    if (url.pathname === '/api/metrics') {
+      // API endpoint for system and service metrics
+      try {
+        const metrics = await getSystemMetrics();
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({
+          metrics: {
+            timestamp: new Date().toISOString(),
+            cpu: metrics.cpu || {},
+            memory: metrics.memory || {},
+            network: metrics.network || {},
+            disk: metrics.disk || {}
+          },
+          systemInfo: {
+            cpu: { cores: metrics.cpu?.cores || 0, model: metrics.cpu?.model || 'Unknown' },
+            memory: { total: metrics.memory?.total || 0 },
+            disk: { total: metrics.disk?.total || 0, available: metrics.disk?.available || 0 },
+            network: { interfaces: metrics.network?.interfaces || [] }
+          }
+        }, null, 2));
+      } catch (e) {
+        console.error('❌ Metrics API error:', e.message);
         res.writeHead(500, {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*'
