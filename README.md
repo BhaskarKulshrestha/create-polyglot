@@ -587,21 +587,3 @@ See [`docs/automated-release-notes.md`](docs/automated-release-notes.md) for det
 ## License
 MIT
 
-## Documentation Site (VitePress)
-
-Local docs development:
-```bash
-npm run docs:dev
-```
-Build static site:
-```bash
-npm run docs:build
-```
-Preview production build:
-```bash
-npm run docs:preview
-```
-Docs source lives in `docs/` with sidebar-driven structure defined in `docs/.vitepress/config.mjs`.
-
-### Deployment
-Docs are auto-deployed to GitHub Pages on pushes to `main` that touch `docs/` via `.github/workflows/docs.yml`. The base path is set using `VITEPRESS_BASE=/create-polyglot/`.
