@@ -586,4 +586,3 @@ See [`docs/automated-release-notes.md`](docs/automated-release-notes.md) for det
 
 ## License
 MIT
-
