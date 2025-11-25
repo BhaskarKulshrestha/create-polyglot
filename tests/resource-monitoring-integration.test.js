@@ -243,10 +243,10 @@ process.on('SIGTERM', () => {
     const response = await makeRequest('GET', 'http://localhost:9995/');
     expect(response.statusCode).toBe(200);
     expect(response.body).toContain('chart.js');
-    expect(response.body).toContain('canvas id="cpu-chart"');
-    expect(response.body).toContain('canvas id="memory-chart"');
-    expect(response.body).toContain('canvas id="network-chart"');
-    expect(response.body).toContain('canvas id="disk-chart"');
+    expect(response.body).toMatch(/<canvas[^>]*\bid\s*=\s*["']cpu-chart["'][^>]*>/i);
+    expect(response.body).toMatch(/<canvas[^>]*\bid\s*=\s*["']memory-chart["'][^>]*>/i);
+    expect(response.body).toMatch(/<canvas[^>]*\bid\s*=\s*["']network-chart["'][^>]*>/i);
+    expect(response.body).toMatch(/<canvas[^>]*\bid\s*=\s*["']disk-chart["'][^>]*>/i);
   }, 15000);
 });
 
