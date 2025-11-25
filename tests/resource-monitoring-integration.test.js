@@ -112,7 +112,8 @@ process.on('SIGTERM', () => {
     adminProcess = execa('node', [
       path.join(process.cwd(), 'bin', 'index.js'),
       'admin',
-      '--port', '9999'
+      '--port', '9999',
+      '--no-open'
     ], {
       cwd: testWorkspace,
       stdio: 'pipe'
@@ -133,7 +134,7 @@ process.on('SIGTERM', () => {
     expect(response.body).toContain('CPU Usage');
     expect(response.body).toContain('Memory Usage');
     expect(response.body).toContain('Network I/O');
-    expect(response.body).toContain('Disk I/O');
+    expect(response.body).toContain('Disk Usage');
   }, 15000);
 
   it('should provide metrics API endpoint', async () => {
@@ -141,7 +142,8 @@ process.on('SIGTERM', () => {
     adminProcess = execa('node', [
       path.join(process.cwd(), 'bin', 'index.js'),
       'admin',
-      '--port', '9998'
+      '--port', '9998',
+      '--no-open'
     ], {
       cwd: testWorkspace,
       stdio: 'pipe'
@@ -169,7 +171,8 @@ process.on('SIGTERM', () => {
     adminProcess = execa('node', [
       path.join(process.cwd(), 'bin', 'index.js'),
       'admin',
-      '--port', '9997'
+      '--port', '9997',
+      '--no-open'
     ], {
       cwd: testWorkspace,
       stdio: 'pipe'
@@ -198,7 +201,8 @@ process.on('SIGTERM', () => {
     adminProcess = execa('node', [
       path.join(process.cwd(), 'bin', 'index.js'),
       'admin',
-      '--port', '9996'
+      '--port', '9996',
+      '--no-open'
     ], {
       cwd: testWorkspace,
       stdio: 'pipe'
@@ -230,7 +234,8 @@ process.on('SIGTERM', () => {
     adminProcess = execa('node', [
       path.join(process.cwd(), 'bin', 'index.js'),
       'admin',
-      '--port', '9995'
+      '--port', '9995',
+      '--no-open'
     ], {
       cwd: testWorkspace,
       stdio: 'pipe'
