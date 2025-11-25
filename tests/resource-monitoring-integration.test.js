@@ -217,11 +217,11 @@ process.on('SIGTERM', () => {
         new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
       ]);
       
-      // Process should exit (either gracefully or terminated)
-      expect(adminProcess.killed || result.exitCode !== undefined).toBe(true);
+      // Process should exit gracefully (exit code 0)
+      expect(result.exitCode).toBe(0);
     } catch (error) {
-      // If timeout or termination, that's acceptable in test environment
-      expect(error.message === 'Timeout' || error.signal === 'SIGTERM' || error.signal === 'SIGKILL').toBe(true);
+      // Only accept SIGTERM as a valid termination signal
+      expect(error.signal).toBe('SIGTERM');
     }
   }, 15000);
 
